@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { GenerateRequest, Health } from "./api/types";
@@ -288,6 +288,62 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText("モデル"), "sd15");
     await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
     expect(screen.queryByAltText("顔の写真のプレビュー")).not.toBeInTheDocument();
+  });
+
+  it("applies the built-in realistic-human preset", async () => {
+    const { generateCalls } = mockServer();
+    const user = await renderReady();
+
+    await user.selectOptions(screen.getByLabelText("プリセット"), "realistic-human");
+    expect(screen.getByText("人物写真向け")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "適用" }));
+    expect(await screen.findByText("「リアルな人間」を適用しました。")).toBeInTheDocument();
+
+    expect(screen.getByLabelText("モデル")).toHaveValue("sdxl");
+    expect(screen.getByLabelText("スタイル")).toHaveValue("photo");
+    expect(screen.getByLabelText("幅")).toHaveValue(896);
+    expect(screen.getByLabelText("高さ")).toHaveValue(1152);
+    // The built-in preset can't be deleted.
+    expect(screen.getByRole("button", { name: "「リアルな人間」を削除" })).toBeDisabled();
+
+    await user.type(promptBox(), "a man");
+    await user.click(generateButton());
+    await screen.findByRole("img", { name: /生成画像/ });
+    expect(generateCalls[0]).toMatchObject({
+      model: "sdxl",
+      style: "photo",
+      scheduler: "dpmpp_2m_karras",
+      width: 896,
+      height: 1152,
+      guidance_scale: 3.5,
+      negative_prompt: "bad hands",
+      prompt: "a man",
+    });
+  });
+
+  it("saves the current settings, keeps them after a reload, and deletes them", async () => {
+    mockServer();
+    const user = await renderReady();
+
+    await user.selectOptions(screen.getByLabelText("画像形式"), "webp");
+    const steps = screen.getByLabelText("ステップ数");
+    await user.clear(steps);
+    await user.type(steps, "40");
+    await user.type(screen.getByLabelText("保存する名前"), "速い WebP{Enter}");
+    expect(await screen.findByText("「速い WebP」を保存しました。")).toBeInTheDocument();
+
+    // Reload the app: the preset comes back from localStorage.
+    cleanup();
+    mockServer();
+    await renderReady();
+    await user.selectOptions(screen.getByLabelText("プリセット"), screen.getByRole("option", { name: "速い WebP" }));
+    await user.click(screen.getByRole("button", { name: "適用" }));
+    expect(screen.getByLabelText("画像形式")).toHaveValue("webp");
+    expect(screen.getByLabelText("ステップ数")).toHaveValue(40);
+
+    await user.click(screen.getByRole("button", { name: "「速い WebP」を削除" }));
+    expect(await screen.findByText("「速い WebP」を削除しました。")).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "速い WebP" })).not.toBeInTheDocument();
   });
 
   it("warns that face/pose references need a first-time download", async () => {

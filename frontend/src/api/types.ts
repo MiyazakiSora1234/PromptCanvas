@@ -84,6 +84,31 @@ export interface FormatOption extends Option {
   extension: string;
 }
 
+/** Generation settings stored in a preset. Omitted fields mean "the model's default". */
+export interface PresetSettings {
+  model: string;
+  style?: string | null;
+  scheduler?: string | null;
+  width?: number | null;
+  height?: number | null;
+  num_inference_steps?: number | null;
+  guidance_scale?: number | null;
+  negative_prompt?: string | null;
+  num_images?: number | null;
+  output_format?: OutputFormat | null;
+  quality?: number | null;
+  loras?: LoraRequest[];
+  identity_strength?: number | null;
+  pose_strength?: number | null;
+}
+
+export interface PresetEntry {
+  id: string;
+  label: string;
+  description: string;
+  settings: PresetSettings;
+}
+
 export interface AppConfig {
   limits: Limits;
   default_model: string;
@@ -94,6 +119,8 @@ export interface AppConfig {
   output_formats: FormatOption[];
   /** null when the server has face/pose references disabled. */
   identity: IdentityOption | null;
+  /** Built-in presets shipped with the server. */
+  presets: PresetEntry[];
   defaults: {
     num_images: number;
     output_format: OutputFormat;

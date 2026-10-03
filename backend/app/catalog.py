@@ -112,6 +112,46 @@ class IdentityConfig(BaseModel):
         ]
 
 
+class PresetLora(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str
+    scale: float = Field(ge=0, le=2)
+
+
+class PresetSettings(BaseModel):
+    """Generation settings a preset applies. Omitted fields keep the model's defaults.
+
+    Prompt, seed and images are deliberately not part of presets: they change every time.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, protected_namespaces=())
+
+    model: str
+    style: str | None = None
+    scheduler: str | None = None
+    width: int | None = None
+    height: int | None = None
+    num_inference_steps: int | None = None
+    guidance_scale: float | None = None
+    negative_prompt: str | None = None
+    num_images: int | None = None
+    output_format: Literal["png", "jpeg", "webp"] | None = None
+    quality: int | None = Field(default=None, ge=1, le=100)
+    loras: tuple[PresetLora, ...] = ()
+    identity_strength: float | None = Field(default=None, ge=0, le=1.5)
+    pose_strength: float | None = Field(default=None, ge=0, le=1.5)
+
+
+class PresetEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=_ID_PATTERN)
+    label: str
+    description: str = ""
+    settings: PresetSettings
+
+
 class Catalog(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -119,10 +159,11 @@ class Catalog(BaseModel):
     models: tuple[ModelEntry, ...] = Field(min_length=1)
     loras: tuple[LoraEntry, ...] = ()
     identity: IdentityConfig | None = None
+    presets: tuple[PresetEntry, ...] = ()
 
     @model_validator(mode="after")
     def _check(self) -> Catalog:
-        for kind, entries in (("model", self.models), ("lora", self.loras)):
+        for kind, entries in (("model", self.models), ("lora", self.loras), ("preset", self.presets)):
             ids = [e.id for e in entries]
             if len(ids) != len(set(ids)):
                 raise ValueError(f"duplicate {kind} ids in catalog")
@@ -133,6 +174,19 @@ class Catalog(BaseModel):
                 raise ValueError(f"model '{m.id}': unknown scheduler '{m.defaults.scheduler}'")
             if m.defaults.style not in STYLES:
                 raise ValueError(f"model '{m.id}': unknown style '{m.defaults.style}'")
+        for p in self.presets:
+            s = p.settings
+            model = self.model(s.model)
+            if model is None:
+                raise ValueError(f"preset '{p.id}': unknown model '{s.model}'")
+            if s.scheduler is not None and s.scheduler not in SCHEDULERS:
+                raise ValueError(f"preset '{p.id}': unknown scheduler '{s.scheduler}'")
+            if s.style is not None and s.style not in STYLES:
+                raise ValueError(f"preset '{p.id}': unknown style '{s.style}'")
+            for item in s.loras:
+                lora = self.lora(item.id)
+                if lora is None or lora.family != model.family:
+                    raise ValueError(f"preset '{p.id}': LoRA '{item.id}' is unknown or not for {model.family}")
         return self
 
     def model(self, model_id: str) -> ModelEntry | None:
@@ -158,6 +212,19 @@ class Catalog(BaseModel):
                 raise ValueError(f"model '{m.id}': default steps exceed PROMPTCANVAS_MAX_STEPS")
             if not 0 <= d.guidance_scale <= settings.max_guidance_scale:
                 raise ValueError(f"model '{m.id}': default guidance_scale exceeds the configured maximum")
+        for p in self.presets:
+            s = p.settings
+            for dim, size in (("width", s.width), ("height", s.height)):
+                if size is not None and (
+                    not settings.min_image_size <= size <= settings.max_image_size or size % SIZE_MULTIPLE
+                ):
+                    raise ValueError(f"preset '{p.id}': {dim} {size} is outside the configured limits")
+            if s.num_inference_steps is not None and not 1 <= s.num_inference_steps <= settings.max_steps:
+                raise ValueError(f"preset '{p.id}': steps exceed PROMPTCANVAS_MAX_STEPS")
+            if s.guidance_scale is not None and not 0 <= s.guidance_scale <= settings.max_guidance_scale:
+                raise ValueError(f"preset '{p.id}': guidance_scale exceeds the configured maximum")
+            if s.num_images is not None and not 1 <= s.num_images <= settings.max_batch_size:
+                raise ValueError(f"preset '{p.id}': num_images exceeds PROMPTCANVAS_MAX_BATCH_SIZE")
 
 
 def load_catalog(settings: Settings) -> Catalog:

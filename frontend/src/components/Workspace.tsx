@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { AppConfig } from "../api/types";
 import { useImageGeneration } from "../hooks/useImageGeneration";
+import { usePresets } from "../hooks/usePresets";
+import { applyPreset, captureSettings } from "../lib/presets";
 import { ImageFileError, readImageFile, sizeForAspect } from "../lib/images";
 import { presentError } from "../lib/presentError";
 import {
@@ -55,6 +57,7 @@ export function Workspace({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
   const { busy, startedAt, result, generate } = useImageGeneration();
+  const presets = usePresets(config);
 
   const showErrors = (text: string, errors: FieldErrors, openAdvanced: boolean) => {
     setMessage(text);
@@ -134,6 +137,30 @@ export function Workspace({
     setFieldErrors((prev) => withoutKeys(prev, fields));
   };
 
+  const handleApplyPreset = (id: string): string => {
+    const preset = presets.find(id);
+    if (!preset) return "プリセットが見つかりません。";
+    const applied = applyPreset(form, preset.settings, config);
+    if (!applied.ok) return applied.error;
+    let next = applied.state;
+    const notes = [...applied.warnings];
+    // With a reference / img2img image, the output keeps that image's aspect ratio.
+    if (next.initImage ?? next.poseImage ?? next.faceImage) {
+      next = { ...next, values: { ...next.values, ...sizeFor(next, next.values.model) } };
+      notes.push("出力サイズは選択中の画像の縦横比に合わせました。");
+    }
+    setForm(next);
+    setFieldErrors({});
+    setMessage(null);
+    return [`「${preset.label}」を適用しました。`, ...notes].join(" ");
+  };
+
+  const handleSavePreset = (name: string): string => {
+    const saved = presets.save(name, captureSettings(form));
+    if (!saved.ok) return "保存できませんでした（このブラウザでは設定を保存できない状態です）。";
+    return saved.overwritten ? `「${name}」を上書き保存しました。` : `「${name}」を保存しました。`;
+  };
+
   const handleLorasChange = (loras: LoraSelection[]) => {
     setForm((prev) => ({ ...prev, loras }));
     setFieldErrors((prev) => withoutKeys(prev, ["loras"]));
@@ -201,6 +228,9 @@ export function Workspace({
           clearImage(kind === "face" ? "faceImage" : "poseImage", [`${kind}_image`, `${kind === "face" ? "identity" : "pose"}_strength`])
         }
         identityCached={identityCached}
+        presets={presets}
+        onApplyPreset={handleApplyPreset}
+        onSavePreset={handleSavePreset}
         advancedOpen={advancedOpen}
         onAdvancedOpenChange={setAdvancedOpen}
         onSubmit={() => void handleSubmit()}

@@ -81,6 +81,23 @@ export const CONFIG: AppConfig = {
     { id: "webp", label: "WebP", lossy: true, extension: "webp" },
   ],
   identity: { families: ["sdxl"], download_size_gb: 6.6 },
+  presets: [
+    {
+      id: "realistic-human",
+      label: "リアルな人間",
+      description: "人物写真向け",
+      settings: {
+        model: "sdxl",
+        style: "photo",
+        scheduler: "dpmpp_2m_karras",
+        width: 896,
+        height: 1152,
+        num_inference_steps: 30,
+        guidance_scale: 3.5,
+        negative_prompt: "bad hands",
+      },
+    },
+  ],
   defaults: { num_images: 1, output_format: "png", quality: 90, strength: 0.6, identity_strength: 0.8, pose_strength: 0.9 },
 };
 

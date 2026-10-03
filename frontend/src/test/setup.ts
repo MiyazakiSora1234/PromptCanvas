@@ -8,5 +8,6 @@ URL.revokeObjectURL = vi.fn();
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.unstubAllGlobals();
 });

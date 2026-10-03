@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
-from .catalog import Catalog, LoraEntry, ModelEntry
+from .catalog import Catalog, LoraEntry, ModelEntry, PresetEntry
 from .config import SEED_MAX, SIZE_MULTIPLE, Settings
 from .errors import FieldError, InvalidInputError
 from .imaging import OUTPUT_FORMATS, ImageDecodeError, OutputFormat, decode_base64_image
@@ -383,6 +383,7 @@ class ConfigResponse(BaseModel):
     loras: list[LoraOption]
     output_formats: list[FormatOption]
     identity: IdentityOption | None = Field(description="顔・ポーズ参照（null なら無効）")
+    presets: list[PresetEntry] = Field(description="組み込みの設定プリセット")
     defaults: Defaults
 
     @classmethod
@@ -446,6 +447,7 @@ class ConfigResponse(BaseModel):
                 if catalog.identity
                 else None
             ),
+            presets=list(catalog.presets),
             defaults=Defaults(
                 num_images=1,
                 output_format="png",

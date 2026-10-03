@@ -52,6 +52,27 @@
       "default_scale": 1.0
     }
   ],
+  "presets": [
+    {
+      "id": "realistic-human",
+      "label": "リアルな人間",
+      "description": "RealVisXL + 写実スタイル。肌の質感が自然な人物写真向け（縦長 896×1152）。手・目の崩れを防ぐネガティブプロンプト付き。",
+      "settings": {
+        "model": "realvis-xl",
+        "style": "photo",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 896,
+        "height": 1152,
+        "num_inference_steps": 30,
+        "guidance_scale": 3.5,
+        "negative_prompt": "deformed, disfigured, bad anatomy, bad hands, extra fingers, missing fingers, fused fingers, extra limbs, cross-eyed, asymmetrical eyes, blurry",
+        "num_images": 1,
+        "output_format": "png",
+        "identity_strength": 0.8,
+        "pose_strength": 0.9
+      }
+    }
+  ],
   "identity": {
     "families": ["sdxl"],
     "download_size_gb": 6.6,

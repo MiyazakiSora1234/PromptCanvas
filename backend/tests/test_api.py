@@ -50,6 +50,10 @@ def test_config_exposes_catalog_and_limits(make_client: MakeClient) -> None:
     assert [lora["id"] for lora in body["loras"]] == ["pixel", "style15"]
     assert [f["id"] for f in body["output_formats"]] == ["png", "jpeg", "webp"]
     assert body["identity"] == {"families": ["sdxl"], "download_size_gb": 6.6}
+    [preset] = body["presets"]
+    assert preset["id"] == "real"
+    assert preset["settings"]["model"] == "sdxl"
+    assert preset["settings"]["width"] == 896
     assert body["limits"]["max_control_strength"] == 1.5
     # Repository names are server-side details, never exposed.
     assert "test/sdxl" not in str(body)

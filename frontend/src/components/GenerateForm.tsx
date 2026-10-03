@@ -11,7 +11,9 @@ import {
   type LoraSelection,
 } from "../lib/validation";
 import { InitImagePicker } from "./InitImagePicker";
+import type { PresetStore } from "../hooks/usePresets";
 import { LoraPicker } from "./LoraPicker";
+import { PresetBar } from "./PresetBar";
 import { ReferencePicker } from "./ReferencePicker";
 import { buttonClass, inputClass, primaryButtonClass } from "./styles";
 import { Alert, Field, Panel } from "./ui";
@@ -40,6 +42,9 @@ interface GenerateFormProps {
   onReferenceClear: (kind: "face" | "pose") => void;
   /** Face/pose assets downloaded; null while unknown. */
   identityCached: boolean | null;
+  presets: PresetStore;
+  onApplyPreset: (id: string) => string;
+  onSavePreset: (name: string) => string;
   advancedOpen: boolean;
   onAdvancedOpenChange: (open: boolean) => void;
   onSubmit: () => void;
@@ -64,6 +69,9 @@ export function GenerateForm({
   onReferenceFile,
   onReferenceClear,
   identityCached,
+  presets,
+  onApplyPreset,
+  onSavePreset,
   advancedOpen,
   onAdvancedOpenChange,
   onSubmit,
@@ -113,7 +121,7 @@ export function GenerateForm({
   };
 
   const promptLength = values.prompt.trim().length;
-  const presets = SIZE_PRESETS.filter(
+  const sizePresets = SIZE_PRESETS.filter(
     ([w, h]) => Math.max(w, h) <= limits.max_image_size && Math.min(w, h) >= limits.min_image_size,
   );
   const batchSizes = Array.from({ length: limits.max_batch_size }, (_, i) => i + 1);
@@ -121,6 +129,8 @@ export function GenerateForm({
   return (
     <Panel>
       <form ref={formRef} noValidate onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="flex flex-col gap-4">
+        <PresetBar config={config} presets={presets} disabled={busy} onApply={onApplyPreset} onSave={onSavePreset} />
+
         <Field id="model" label="モデル" error={fieldErrors.model} hint={model.description}>
           <select {...controlProps("model")} onChange={(e) => onModelChange(e.target.value)} disabled={busy}>
             {config.models.map((m) => (
@@ -296,7 +306,7 @@ export function GenerateForm({
             <fieldset className="flex flex-col gap-2">
               <legend className="mb-1 text-sm font-semibold">画像サイズ（px）</legend>
               <div className="flex flex-wrap gap-1.5">
-                {presets.map(([w, h]) => {
+                {sizePresets.map(([w, h]) => {
                   const selected = values.width === String(w) && values.height === String(h);
                   return (
                     <button

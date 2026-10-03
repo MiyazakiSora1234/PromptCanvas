@@ -46,6 +46,13 @@ CATALOG = Catalog.model_validate(
             {"id": "pixel", "label": "Pixel", "repo": "test/pixel", "family": "sdxl", "default_scale": 0.8},
             {"id": "style15", "label": "Style15", "repo": "test/style15", "family": "sd15"},
         ],
+        "presets": [
+            {
+                "id": "real",
+                "label": "Real",
+                "settings": {"model": "sdxl", "style": "photo", "width": 896, "height": 1152, "loras": []},
+            }
+        ],
         "identity": {
             "families": ["sdxl"],
             "download_size_gb": 6.6,
