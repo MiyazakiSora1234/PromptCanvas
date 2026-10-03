@@ -76,6 +76,10 @@ def create_app(settings: Settings | None = None, generator: ImageGenerator | Non
         if settings.frontend_dir.is_dir():
             app.mount("/", StaticFiles(directory=settings.frontend_dir, html=True), name="frontend")
         else:
-            logger.warning("Frontend directory not found: %s (serving API only)", settings.frontend_dir)
+            logger.warning(
+                "Frontend build not found at %s; serving the API only. Run `npm run build` in frontend/ "
+                "(or `make frontend-build`).",
+                settings.frontend_dir,
+            )
 
     return app

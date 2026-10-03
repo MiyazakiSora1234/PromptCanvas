@@ -67,7 +67,8 @@ class Settings(BaseSettings):
     # --- Server ----------------------------------------------------------
     cors_origins: list[str] = Field(default_factory=list)
     serve_frontend: bool = True
-    frontend_dir: Path = PROJECT_DIR / "frontend"
+    # Output of `npm run build` in frontend/.
+    frontend_dir: Path = PROJECT_DIR / "frontend" / "dist"
     log_level: LogLevel = "INFO"
 
     @model_validator(mode="after")

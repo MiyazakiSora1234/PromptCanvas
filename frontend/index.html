@@ -1,113 +1,12 @@
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- APIを別オリジンで動かす場合はベースURLを設定（例: http://localhost:8000）。同一オリジンなら空のまま。 -->
-  <meta name="api-base" content="">
-  <title>PromptCanvas</title>
-  <link rel="stylesheet" href="styles.css">
-  <script type="module" src="app.js"></script>
-</head>
-<body>
-  <header class="app-header">
-    <h1>PromptCanvas</h1>
-    <p id="model-status" class="status-badge" data-state="unknown" role="status" aria-live="polite">サーバーに接続中…</p>
-  </header>
-
-  <main class="layout">
-    <form id="generate-form" class="panel" novalidate>
-      <div class="field">
-        <label for="prompt">プロンプト <span class="required">必須</span></label>
-        <textarea id="prompt" name="prompt" rows="5"
-          placeholder="例: a watercolor painting of a lighthouse at sunset, soft light, highly detailed"></textarea>
-        <div class="field-meta">
-          <span class="hint">英語での入力を推奨します。Ctrl+Enter でも生成できます。</span>
-          <span id="prompt-count" class="counter">0 / 1000</span>
-        </div>
-        <p class="field-error" data-error-for="prompt"></p>
-      </div>
-
-      <details class="advanced" id="advanced">
-        <summary>詳細設定</summary>
-
-        <div class="field">
-          <label for="negative_prompt">ネガティブプロンプト</label>
-          <textarea id="negative_prompt" name="negative_prompt" rows="2"
-            placeholder="例: blurry, low quality, watermark"></textarea>
-          <p class="field-error" data-error-for="negative_prompt"></p>
-        </div>
-
-        <fieldset class="field">
-          <legend>画像サイズ（px）</legend>
-          <div class="presets" id="size-presets">
-            <button type="button" data-width="512" data-height="512">512×512</button>
-            <button type="button" data-width="768" data-height="512">768×512</button>
-            <button type="button" data-width="512" data-height="768">512×768</button>
-            <button type="button" data-width="768" data-height="768">768×768</button>
-            <button type="button" data-width="1024" data-height="1024">1024×1024</button>
-          </div>
-          <div class="row">
-            <div class="field">
-              <label for="width">幅</label>
-              <input id="width" name="width" type="number" inputmode="numeric" step="8">
-              <p class="field-error" data-error-for="width"></p>
-            </div>
-            <div class="field">
-              <label for="height">高さ</label>
-              <input id="height" name="height" type="number" inputmode="numeric" step="8">
-              <p class="field-error" data-error-for="height"></p>
-            </div>
-          </div>
-          <p class="hint" id="size-hint">8の倍数で指定してください。大きいほど時間とGPUメモリを消費します。</p>
-        </fieldset>
-
-        <div class="row">
-          <div class="field">
-            <label for="num_inference_steps">ステップ数</label>
-            <input id="num_inference_steps" name="num_inference_steps" type="number" inputmode="numeric" step="1">
-            <p class="field-error" data-error-for="num_inference_steps"></p>
-          </div>
-          <div class="field">
-            <label for="guidance_scale">ガイダンススケール</label>
-            <input id="guidance_scale" name="guidance_scale" type="number" inputmode="decimal" step="0.5">
-            <p class="field-error" data-error-for="guidance_scale"></p>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="seed">シード値</label>
-          <div class="inline">
-            <input id="seed" name="seed" type="number" inputmode="numeric" step="1" min="0" placeholder="空欄でランダム">
-            <button type="button" id="random-seed">ランダム</button>
-          </div>
-          <p class="hint">同じシードと設定で同じ画像を再現できます。</p>
-          <p class="field-error" data-error-for="seed"></p>
-        </div>
-      </details>
-
-      <div class="actions">
-        <button type="submit" id="submit-button" class="primary">画像を生成</button>
-      </div>
-      <div id="form-message" class="alert" role="alert" hidden></div>
-    </form>
-
-    <section class="panel result" aria-labelledby="result-title">
-      <h2 id="result-title">生成結果</h2>
-      <div id="result-frame" class="result-frame" data-state="empty" aria-busy="false">
-        <p class="placeholder" id="placeholder">生成した画像がここに表示されます。</p>
-        <div class="progress" id="progress" hidden>
-          <span class="spinner" aria-hidden="true"></span>
-          <span>生成中… <span id="elapsed">0.0</span> 秒</span>
-        </div>
-        <img id="result-image" alt="" hidden>
-      </div>
-      <dl id="result-meta" class="meta" hidden></dl>
-      <div class="result-actions">
-        <a id="download-link" class="button primary" download hidden>PNGをダウンロード</a>
-        <button type="button" id="reuse-seed" hidden>このシードを再利用</button>
-      </div>
-    </section>
-  </main>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PromptCanvas</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

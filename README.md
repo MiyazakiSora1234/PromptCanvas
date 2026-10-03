@@ -4,23 +4,30 @@ Hugging Face Diffusers を使った画像生成 Web アプリです。ブラウ�
 
 ```
 PromptCanvas/
-├── backend/                 # API（FastAPI + Diffusers）
+├── Makefile                     # セットアップ・起動・テストのタスク
+├── backend/                     # API（FastAPI + Diffusers）
 │   ├── app/
-│   │   ├── main.py          # ルーティング・例外ハンドラ・起動時ロード
-│   │   ├── config.py        # 環境変数による設定（pydantic-settings）
-│   │   ├── schemas.py       # リクエスト/レスポンス型とサーバー側入力検証
-│   │   ├── generator.py     # Diffusers パイプラインのロードと生成
-│   │   ├── limiter.py       # 同時実行数と待ち行列の制御
-│   │   └── errors.py        # ユーザー向けエラーと例外の分類
-│   ├── tests/               # pytest（GPU・torch 不要）
-│   ├── requirements.txt
-│   ├── requirements-dev.txt
+│   │   ├── main.py              # アプリ生成（ミドルウェア・起動時ロード・静的配信）
+│   │   ├── api.py               # /api のルート
+│   │   ├── error_handlers.py    # 例外 → エラー JSON への変換
+│   │   ├── config.py            # 環境変数による設定（pydantic-settings）
+│   │   ├── schemas.py           # リクエスト/レスポンス型とサーバー側入力検証
+│   │   ├── generator.py         # Diffusers パイプラインのロードと生成
+│   │   ├── limiter.py           # 同時実行数と待ち行列の制御
+│   │   └── errors.py            # ユーザー向けエラーと例外の分類
+│   ├── scripts/download_model.py
+│   ├── tests/                   # pytest（GPU・torch 不要）
+│   ├── requirements.txt / requirements-dev.txt
 │   └── .env.example
-└── frontend/                # Web 画面（ビルド不要の HTML/CSS/JS）
-    ├── index.html
-    ├── app.js               # 画面制御・API 呼び出し
-    ├── validation.js        # クライアント側入力検証
-    └── styles.css
+└── frontend/                    # Web 画面（Vite + React + TypeScript + Tailwind CSS）
+    ├── src/
+    │   ├── api/                 # API の型とクライアント（fetch・エラー型）
+    │   ├── hooks/               # 設定取得・状態ポーリング・生成処理
+    │   ├── lib/                 # 入力検証・エラー表示ロジック（純粋関数）
+    │   ├── components/          # 画面部品
+    │   └── App.tsx
+    ├── vite.config.ts           # 開発時に /api を FastAPI へプロキシ
+    └── package.json
 ```
 
 ## 技術選定
@@ -30,13 +37,16 @@ PromptCanvas/
 | 画像生成 | Diffusers `AutoPipelineForText2Image` | モデル ID を変えるだけで SD1.5 / SDXL / SD-Turbo などを切り替えられる |
 | API | FastAPI + Uvicorn | Diffusers と同じ Python で書け、Pydantic による型付き入力検証と OpenAPI ドキュメントが標準で付く |
 | 設定 | pydantic-settings | 環境変数・`.env` を型付きで読み込み、不正な設定を起動時に検出できる |
-| フロントエンド | 素の HTML/CSS/JavaScript（ES Modules、`// @ts-check` + JSDoc 型） | 画面が 1 枚で、Node.js やビルド工程なしで動かせる。エディタ（VS Code 等）で型チェックが効く |
+| フロントエンド | React + TypeScript（Vite） | 状態（入力・生成中・結果・エラー）をコンポーネントとフックに分けて管理でき、型で API との契約を表現できる。Vite は設定が少なく開発サーバーが速い |
+| スタイル | Tailwind CSS v4 | クラスだけでライト/ダークモード両対応の UI を組め、CSS ファイルの管理が不要 |
+| テスト | pytest / Vitest + Testing Library | API は GPU なしで、画面は fetch をモックしてユーザー操作単位で検証できる |
 
-フロントエンドと API は責務を分けています。フロントエンドは `/api/*` を呼ぶだけの静的ファイルで、既定では FastAPI が同一オリジンで配信します。別サーバー（CDN、Vite など）で配信する場合は `frontend/index.html` の `<meta name="api-base">` に API の URL を設定し、`PROMPTCANVAS_CORS_ORIGINS` を設定してください。
+フロントエンドと API は責務を分けています。フロントエンドは `/api/*` を呼ぶだけの静的アプリで、本番ではビルド成果物（`frontend/dist`）を FastAPI が同一オリジンで配信します。開発時は Vite の開発サーバーが `/api` を FastAPI にプロキシします。別オリジンで配信する場合は、ビルド時に `VITE_API_BASE`（例: `http://localhost:8000`）を設定し、API 側で `PROMPTCANVAS_CORS_ORIGINS` を設定してください。
 
 ## 前提条件
 
 - **Python 3.11 以上**（3.14 で動作確認済み。使う Python バージョン向けの PyTorch ホイールがあることを確認してください）
+- **Node.js 22 以上**（24 LTS で動作確認済み。フロントエンドのビルドに使用。Windows: `winget install OpenJS.NodeJS.LTS`）
 - ディスク空き容量：既定モデル（SD1.5）で約 5GB、SDXL なら約 10GB 以上（`~/.cache/huggingface` に保存）
 - 初回起動時にモデルをダウンロードするためのインターネット接続
 
@@ -60,12 +70,12 @@ PromptCanvas/
 GNU Make が必要です（Windows: `winget install ezwinports.make`）。Windows（cmd / Git Bash）と macOS / Linux のどちらでも動きます。
 
 ```bash
-make setup                 # venv 作成 + PyTorch(CUDA 12.8) + 依存関係 + 開発ツール
+make setup                 # venv + PyTorch(CUDA 12.8) + Python/npm 依存関係 + フロントエンドのビルド
 make setup TORCH=cpu       # GPU がない場合
 make env                   # backend/.env を .env.example から作成（既存なら何もしない）
 make download-model        # モデルを事前取得（任意。起動時にも自動取得される）
-make run                   # http://127.0.0.1:8000 で起動（PORT=8080 などで変更可）
-make check                 # ruff + mypy + pytest
+make run                   # フロントエンドをビルドして http://127.0.0.1:8000 で起動（PORT=8080 などで変更可）
+make check                 # lint + 型チェック + テスト（バックエンド・フロントエンド両方）
 make help                  # ターゲット一覧
 ```
 
@@ -110,6 +120,14 @@ Copy-Item .env.example .env
 
 `backend/.env` を編集します（すべて省略可能。環境変数でも指定できます）。
 
+### 4. フロントエンドをビルド
+
+```powershell
+cd ..\frontend
+npm ci
+npm run build      # frontend/dist に出力され、FastAPI が配信する
+```
+
 ## 環境変数
 
 | 変数 | 既定値 | 説明 |
@@ -130,7 +148,8 @@ Copy-Item .env.example .env
 | `PROMPTCANVAS_MAX_QUEUE_SIZE` | `4` | 生成中に待機できるリクエスト数。超えると 429 |
 | `PROMPTCANVAS_QUEUE_TIMEOUT_SECONDS` | `300` | 待機の上限秒数。超えると 503 |
 | `PROMPTCANVAS_CORS_ORIGINS` | `[]` | 別オリジンからアクセスする場合の許可リスト（JSON 配列） |
-| `PROMPTCANVAS_SERVE_FRONTEND` | `true` | `frontend/` を `/` で配信するか |
+| `PROMPTCANVAS_SERVE_FRONTEND` | `true` | フロントエンドのビルド成果物を `/` で配信するか |
+| `PROMPTCANVAS_FRONTEND_DIR` | `frontend/dist` | 配信するビルド成果物の場所。存在しなければ API のみ起動（警告ログ） |
 | `PROMPTCANVAS_LOG_LEVEL` | `INFO` | ログレベル |
 
 設定値の整合性（既定サイズが範囲内か、8 の倍数か等）は起動時に検証され、不正なら起動に失敗します。
@@ -164,13 +183,27 @@ cd backend
 
 ## 起動
 
+### 通常の起動（ビルド済みフロントエンドを FastAPI が配信）
+
 ```powershell
-cd backend
-.venv\Scripts\Activate.ps1
-uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
+make run
+# または手動で
+cd frontend; npm run build; cd ..\backend
+.venv\Scripts\python.exe -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
 ブラウザで http://127.0.0.1:8000 を開きます。API ドキュメントは http://127.0.0.1:8000/docs です。
+
+### フロントエンド開発（ホットリロード）
+
+ターミナルを 2 つ使います。
+
+```powershell
+make dev-api    # API（:8000）
+make dev-web    # Vite 開発サーバー（:5173）。/api は :8000 にプロキシ
+```
+
+http://localhost:5173 を開くと、`frontend/src` の変更が即座に反映されます。API の転送先は環境変数 `PROMPTCANVAS_API_URL` で変更できます。
 
 > `--reload` を付けるとファイル変更のたびにモデルを再ロードするため、開発時も通常は付けないことを推奨します。
 > `--workers` を 2 以上にするとプロセスごとにモデルがロードされ、GPU メモリを倍以上消費します。
@@ -211,17 +244,14 @@ curl.exe -X POST http://127.0.0.1:8000/api/generate `
 
 ## テスト・静的解析
 
-テストは生成処理をフェイクに差し替えるため、torch や GPU は不要です。
-
 ```powershell
-cd backend
-pip install -r requirements-dev.txt
-pytest
-ruff check .
-mypy
+make check            # 以下をすべて実行
 ```
 
-テスト内容：入力検証（空プロンプト、範囲外、8 の倍数でないサイズ、型不正、未知の項目、不正 JSON）、PNG 応答とシードヘッダ、モデル読み込み中/失敗時の 503、GPU メモリ不足の判別、内部情報が応答に漏れないこと、待ち行列の満杯・タイムアウト、デバイス/dtype 解決、設定値の整合性検証。
+| 対象 | コマンド | 内容 |
+| --- | --- | --- |
+| API | `pytest` / `ruff check .` / `mypy`（`backend/`） | 生成処理をフェイクに差し替えるため torch・GPU 不要。入力検証（空・範囲外・8 の倍数でない・型不正・未知の項目・不正 JSON）、PNG 応答とシードヘッダ、モデル読み込み中/失敗時の 503、GPU メモリ不足の判別、内部情報が応答に漏れないこと、待ち行列の満杯・タイムアウト、デバイス/dtype 解決、設定値の整合性 |
+| 画面 | `npm test` / `npm run lint` / `npm run typecheck`（`frontend/`） | fetch をモックし、生成〜表示〜ダウンロードリンク、送信前の入力検証とフォーカス移動、サーバーエラーの案内表示、生成中の重複送信防止、モデル読み込み中/失敗時のボタン無効化を検証 |
 
 画面の動作確認は、サーバー起動後にブラウザで以下を確認してください：
 

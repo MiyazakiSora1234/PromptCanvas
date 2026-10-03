@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import PROJECT_DIR
 from app.errors import ContentFilteredError
 from app.generator import ModelState, ModelStatus
 
@@ -146,7 +146,17 @@ def test_unknown_api_route_returns_json_error(make_client: MakeClient) -> None:
     assert res.json()["error"]["code"] == "not_found"
 
 
-def test_frontend_is_served(make_client: MakeClient) -> None:
-    res = make_client(serve_frontend=True, frontend_dir=PROJECT_DIR / "frontend").get("/")
+def test_frontend_build_is_served(make_client: MakeClient, tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text("<title>PromptCanvas</title>", encoding="utf-8")
+    client = make_client(serve_frontend=True, frontend_dir=tmp_path)
+    res = client.get("/")
     assert res.status_code == 200
     assert "PromptCanvas" in res.text
+    # API routes still win over the static mount.
+    assert client.get("/api/health").json()["status"] == "ready"
+
+
+def test_missing_frontend_build_serves_api_only(make_client: MakeClient, tmp_path: Path) -> None:
+    client = make_client(serve_frontend=True, frontend_dir=tmp_path / "missing")
+    assert client.get("/").status_code == 404
+    assert client.get("/api/health").status_code == 200
