@@ -1,0 +1,10 @@
+# PyTorch is NOT listed here: install the build matching your GPU first (see README).
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30
+pydantic>=2.7,<3
+pydantic-settings>=2.4,<3
+diffusers>=0.32
+transformers>=4.44
+accelerate>=0.33
+safetensors>=0.4
+pillow>=10.4

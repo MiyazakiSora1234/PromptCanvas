@@ -1,0 +1,26 @@
+[project]
+name = "promptcanvas-backend"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # full-width Japanese punctuation is intentional
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["app"]
+
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "diffusers", "diffusers.*"]
+ignore_missing_imports = true
