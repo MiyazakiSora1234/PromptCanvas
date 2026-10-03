@@ -41,5 +41,18 @@
       "trigger_words": "pixel art",
       "default_scale": 1.0
     }
-  ]
+  ],
+  "identity": {
+    "families": ["sdxl"],
+    "download_size_gb": 6.6,
+    "instantid": { "repo": "InstantX/InstantID", "controlnet_subfolder": "ControlNetModel", "adapter_weight_name": "ip-adapter.bin" },
+    "face_models": {
+      "repo": "immich-app/antelopev2",
+      "revision": "51ca7e153bccebdbae224779e23c9c243e2fec85",
+      "detection": "detection/model.onnx",
+      "recognition": "recognition/model.onnx"
+    },
+    "pose_controlnet": { "repo": "xinsir/controlnet-openpose-sdxl-1.0" },
+    "pose_detector": { "repo": "lllyasviel/Annotators", "weight_name": "body_pose_model.pth" }
+  }
 }

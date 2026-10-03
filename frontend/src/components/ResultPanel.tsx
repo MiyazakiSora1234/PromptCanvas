@@ -46,6 +46,8 @@ export function ResultPanel({ config, startedAt, result, onReuseSeed }: ResultPa
       ["形式", r.output_format.toUpperCase()],
     );
     if (result.request.init_image) meta.push(["img2img", `変換強度 ${result.request.strength}`]);
+    if (result.request.face_image) meta.push(["顔の参照", `再現度 ${result.request.identity_strength}`]);
+    if (result.request.pose_image) meta.push(["ポーズ参照", `強さ ${result.request.pose_strength}`]);
     if (result.request.loras.length > 0)
       meta.push(["LoRA", result.request.loras.map((l) => `${label(config.loras, l.id)} (${l.scale})`).join(", ")]);
     meta.push(["生成時間", `${(r.elapsed_ms / 1000).toFixed(1)} 秒`]);

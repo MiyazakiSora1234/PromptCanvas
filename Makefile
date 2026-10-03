@@ -47,7 +47,7 @@ venv:
 	cd $(BACKEND) && $(PY) -m pip install --upgrade pip
 
 install-torch:
-	cd $(BACKEND) && $(PY) -m pip install torch --index-url https://download.pytorch.org/whl/$(TORCH)
+	cd $(BACKEND) && $(PY) -m pip install torch torchvision --index-url https://download.pytorch.org/whl/$(TORCH)
 	cd $(BACKEND) && $(PY) -c "import torch; print('torch', torch.__version__, '| CUDA available:', torch.cuda.is_available())"
 
 install:

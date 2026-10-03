@@ -26,6 +26,15 @@ _WEIGHT_COMPONENTS = {
 }
 
 
+def are_files_cached(files: list[tuple[str, str, str | None]]) -> bool:
+    """True if every (repo, filename, revision) is fully downloaded."""
+    try:
+        return all(isinstance(try_to_load_from_cache(r, f, revision=rev), str) for r, f, rev in files)
+    except Exception:
+        logger.debug("Cache check failed", exc_info=True)
+        return False
+
+
 def is_model_cached(repo: str, revision: str | None = None) -> bool:
     """True if every weight-bearing component listed in model_index.json has a weights file.
 

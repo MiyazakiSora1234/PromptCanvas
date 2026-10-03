@@ -12,6 +12,7 @@ Hugging Face Diffusers を使った画像生成 Web アプリです。ブラウ�
 | 画像形式 | PNG / JPEG / WebP（JPEG・WebP は画質を指定可） |
 | img2img | 画像をアップロードし、変換強度を指定して描き直し。出力サイズは元画像の縦横比に自動調整 |
 | LoRA | `catalog.json` に登録した LoRA を強さ付きで適用。モデルの系統（SD1.5 / SDXL）が合うものだけ選択可 |
+| 顔・ポーズの参照 | 顔の写真の人物のまま、服装・場面をプロンプトで変える（InstantID）。ポーズ参考画像と同じ姿勢にする（OpenPose ControlNet）。SDXL 系のみ |
 
 ```
 PromptCanvas/
@@ -25,6 +26,7 @@ PromptCanvas/
 │   │   ├── catalog.py           # catalog.json（選択可能なモデル・LoRA）の読み込みと検証
 │   │   ├── schemas.py           # リクエスト/レスポンス型とサーバー側入力検証
 │   │   ├── generator.py         # モデルの入れ替え・txt2img/img2img・LoRA・バッチ生成
+│   │   ├── identity.py          # 顔・ポーズの参照（InstantID + OpenPose ControlNet）
 │   │   ├── schedulers.py        # サンプラー一覧
 │   │   ├── imaging.py           # アップロード画像のデコード、PNG/JPEG/WebP エンコード
 │   │   ├── model_cache.py       # モデルがダウンロード済みかの判定
@@ -110,10 +112,10 @@ python -m pip install --upgrade pip
 
 ```powershell
 # NVIDIA GPU（CUDA 12.8。RTX 50 シリーズを含む新しい GPU）
-pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 # CPU のみ
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ```
 
 その他の組み合わせは https://pytorch.org/get-started/locally/ を参照してください。インストール後、GPU が認識されているか確認できます：
@@ -227,6 +229,30 @@ cd backend; .venv\Scripts\python.exe -m scripts.download_model sdxl pixel-art-xl
 - キャッシュ先は `HF_HOME` で変更できます。オフライン運用では取得後に `HF_HUB_OFFLINE=1` を設定してください。
 - モデルのライセンス（例: CreativeML Open RAIL-M）を確認のうえ利用してください。
 
+## 顔・ポーズの参照（InstantID + OpenPose）
+
+「顔は元画像の人物のまま、ポーズや服装を変える」機能です。SDXL 系モデル（SDXL / Animagine XL）で使えます。
+
+| 入力 | 役割 |
+| --- | --- |
+| 顔の写真 | この人物の顔の特徴（ArcFace の顔特徴量）を IP-Adapter で、顔の位置・向きを IdentityNet（ControlNet）で反映 |
+| ポーズ参考画像 | OpenPose で骨格を検出し、ControlNet で同じ姿勢にする。顔の写真と併用時は、この画像の人物の顔の位置に顔を配置 |
+| プロンプト | 服装・場面・画風（例: `photo of a woman in a red evening dress, ballroom`） |
+
+- 顔だけ・ポーズだけ・両方の組み合わせで使えます。img2img とは同時に使えません。
+- **顔の再現度**（既定 0.8）を上げるほど元の顔に近づきます。色が濃すぎる、プロンプトが効きにくいときは下げてください。ネガティブプロンプトに `watermark, text` を入れると透かし状のノイズを防げます。
+- 写真の人物向けです。イラストの顔や横顔・小さく写った顔は検出できない、または似にくいことがあります。全身の構図では顔が小さくなるため、似る度合いが下がります。
+- 追加のダウンロードは約 6.6GB（初回使用時、または `make download-model`）。顔の検出・特徴抽出は CPU で行い（1 枚 0.2 秒程度）、2 つの ControlNet は使用時だけ GPU に載せます（それ以外の生成の VRAM を圧迫しないため）。
+
+| 部品 | リポジトリ | ライセンス |
+| --- | --- | --- |
+| InstantID（IdentityNet + IP-Adapter） | InstantX/InstantID | Apache-2.0 |
+| 顔検出・顔特徴量（antelopev2: SCRFD / glintr100） | immich-app/antelopev2（revision 固定） | **InsightFace のモデルは非商用研究目的のみ** |
+| OpenPose ControlNet | xinsir/controlnet-openpose-sdxl-1.0 | Apache-2.0 |
+| 骨格検出（OpenPose body） | lllyasviel/Annotators | 各モデルのライセンスに従う |
+
+> **注意:** 実在の人物の写真は、本人の同意を得たものだけを使ってください。生成した画像で他人になりすましたり、名誉・肖像権を侵害したりしないでください。画面にも同じ注意を表示しています。
+
 ## 起動
 
 ### 通常の起動（ビルド済みフロントエンドを FastAPI が配信）
@@ -311,6 +337,7 @@ $r = Invoke-RestMethod http://127.0.0.1:8000/api/generate -Method Post -ContentT
 | `model_loading` | 503 | モデル読み込み中 |
 | `model_unavailable` | 503 | モデル読み込みに失敗（理由を `message` に表示）。次のリクエストで再試行される |
 | `lora_unavailable` | 503 | LoRA の読み込みに失敗 |
+| `reference_unavailable` | 503 | 顔・ポーズ参照用のモデルの読み込みに失敗 |
 | `gpu_out_of_memory` | 503 | GPU メモリ不足（サイズ・ステップを下げるよう案内） |
 | `queue_timeout` | 503 | 待機時間の上限超過 |
 | `generation_failed` | 500 | その他の生成失敗 |
@@ -339,7 +366,8 @@ make check            # 以下をすべて実行
 - 未ダウンロードのモデルは、そのモデルを最初に選んだリクエストの中でダウンロードされます（画面で警告は出ますが、ダウンロードの進捗率は表示されません）。
 - 生成の途中キャンセルや進捗率（ステップ単位）の表示は未対応です（経過秒数のみ）。`callback_on_step_end` と SSE/WebSocket で実装できます。
 - 画像は JSON 内の base64 で返すため、PNG 4 枚（1024px）では応答が 10MB 程度になります。
-- インペイント（部分修正）や ControlNet には未対応です。
+- インペイント（部分修正）には未対応です。ControlNet はポーズ（OpenPose）と InstantID のみです。
+- 顔・ポーズ参照は 1 枚あたり 30〜40 秒程度かかります（SDXL + ControlNet 2 つ、848×1240・30 ステップ、RTX 5060 Ti）。
 - CLIP のトークン上限（77 トークン）を超えるプロンプトは切り詰められます。
 - 認証・レート制限（IP 単位）はありません。外部公開する場合はリバースプロキシ等で追加してください。
 - 生成画像はサーバーに保存しません（履歴機能なし）。

@@ -1,4 +1,4 @@
-# PyTorch is NOT listed here: install the build matching your GPU first (see README).
+# PyTorch / torchvision are NOT listed here: install the build matching your GPU first (see README).
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30
 pydantic>=2.7,<3
@@ -9,3 +9,9 @@ accelerate>=0.33
 peft>=0.15  # LoRA
 safetensors>=0.4
 pillow>=10.4
+numpy>=1.26
+# Face / pose reference (InstantID + OpenPose)
+insightface>=2.0
+onnxruntime>=1.19
+controlnet-aux>=0.0.9
+opencv-python-headless>=4.9

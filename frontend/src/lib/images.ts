@@ -1,7 +1,7 @@
 import type { Limits, ModelDefaults } from "../api/types";
 
-/** An image picked for img2img, already read into memory. */
-export interface InitImage {
+/** An image the user picked (img2img source, face or pose reference), already read into memory. */
+export interface PickedImage {
   dataUrl: string;
   name: string;
   width: number;
@@ -45,7 +45,7 @@ export function sizeForAspect(
 export class ImageFileError extends Error {}
 
 /** Read a user-selected file for img2img. Rejects with a user-facing message. */
-export function readImageFile(file: File, maxMb: number): Promise<InitImage> {
+export function readImageFile(file: File, maxMb: number): Promise<PickedImage> {
   if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
     return Promise.reject(new ImageFileError("PNG / JPEG / WebP の画像を選んでください。"));
   }

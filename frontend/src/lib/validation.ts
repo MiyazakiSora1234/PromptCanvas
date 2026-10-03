@@ -1,7 +1,7 @@
 // Client-side validation. Mirrors backend/app/schemas.py#build_params; the server
 // re-validates everything, this only gives faster feedback.
 import type { AppConfig, GenerateRequest, LoraOption, ModelOption, OutputFormat } from "../api/types";
-import type { InitImage } from "./images";
+import type { PickedImage } from "./images";
 
 /** Text-like inputs, in on-screen order (used to focus the first invalid one). */
 export const FIELD_NAMES = [
@@ -9,6 +9,10 @@ export const FIELD_NAMES = [
   "prompt",
   "init_image",
   "strength",
+  "face_image",
+  "pose_image",
+  "identity_strength",
+  "pose_strength",
   "num_images",
   "output_format",
   "quality",
@@ -25,7 +29,7 @@ export const FIELD_NAMES = [
 export type FieldName = (typeof FIELD_NAMES)[number];
 
 /** Raw input strings, as typed by the user. */
-export type FormValues = Record<Exclude<FieldName, "init_image" | "loras">, string>;
+export type FormValues = Record<Exclude<FieldName, "init_image" | "face_image" | "pose_image" | "loras">, string>;
 
 export interface LoraSelection {
   id: string;
@@ -35,7 +39,16 @@ export interface LoraSelection {
 export interface FormState {
   values: FormValues;
   loras: LoraSelection[];
-  initImage: InitImage | null;
+  initImage: PickedImage | null;
+  /** Person whose face to keep (InstantID). */
+  faceImage: PickedImage | null;
+  /** Pose to copy (OpenPose ControlNet). */
+  poseImage: PickedImage | null;
+}
+
+/** Whether the face/pose reference feature can be used with this model. */
+export function supportsReference(config: AppConfig, model: ModelOption): boolean {
+  return config.identity !== null && config.identity.families.includes(model.family);
 }
 
 /** Keyed by field name; may also contain server-side names such as "body". */
@@ -93,9 +106,13 @@ export function initialFormState(config: AppConfig): FormState {
       output_format: config.defaults.output_format,
       quality: String(config.defaults.quality),
       strength: String(config.defaults.strength),
+      identity_strength: String(config.defaults.identity_strength),
+      pose_strength: String(config.defaults.pose_strength),
     },
     loras: [],
     initImage: null,
+    faceImage: null,
+    poseImage: null,
   };
 }
 
@@ -176,6 +193,21 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
       errors.strength = "ステップ数 × 変換強度が 1 以上になるようにしてください。";
   }
 
+  const { faceImage, poseImage } = state;
+  const identityStrength = parseNumber(values.identity_strength);
+  const poseStrength = parseNumber(values.pose_strength);
+  if (faceImage || poseImage) {
+    const field = faceImage ? "face_image" : "pose_image";
+    if (model && !supportsReference(config, model))
+      errors[field] = `顔・ポーズの参照は SDXL 系のモデルでのみ使えます（選択中: ${model.label}）。`;
+    if (initImage) errors[field] = "img2img（元画像から生成）と顔・ポーズの参照は同時に使えません。どちらかを外してください。";
+    const range = (value: number) =>
+      Number.isFinite(value) && value >= limits.min_control_strength && value <= limits.max_control_strength;
+    const message = `${limits.min_control_strength}〜${limits.max_control_strength}の範囲で指定してください。`;
+    if (faceImage && !range(identityStrength)) errors.identity_strength = message;
+    if (poseImage && !range(poseStrength)) errors.pose_strength = message;
+  }
+
   if (state.loras.length > limits.max_loras) errors.loras = `LoRA は${limits.max_loras}個まで選択できます。`;
   for (const selection of state.loras) {
     const lora = config.loras.find((l) => l.id === selection.id);
@@ -209,6 +241,10 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
       init_image: initImage?.dataUrl ?? null,
       strength: Number.isFinite(strength) ? strength : config.defaults.strength,
       loras: state.loras.map(({ id, scale }) => ({ id, scale })),
+      face_image: faceImage?.dataUrl ?? null,
+      pose_image: poseImage?.dataUrl ?? null,
+      identity_strength: Number.isFinite(identityStrength) ? identityStrength : config.defaults.identity_strength,
+      pose_strength: Number.isFinite(poseStrength) ? poseStrength : config.defaults.pose_strength,
     },
   };
 }

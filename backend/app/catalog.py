@@ -54,12 +54,66 @@ class LoraEntry(_Entry):
     default_scale: float = Field(default=1.0, ge=0, le=2)
 
 
+class _Asset(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repo: str
+    revision: str | None = None
+
+
+class InstantIdAsset(_Asset):
+    controlnet_subfolder: str = "ControlNetModel"
+    adapter_weight_name: str = "ip-adapter.bin"
+
+
+class FaceModelsAsset(_Asset):
+    detection: str
+    recognition: str
+
+
+class ControlNetAsset(_Asset):
+    subfolder: str | None = None
+
+
+class PoseDetectorAsset(_Asset):
+    weight_name: str
+
+
+class IdentityConfig(BaseModel):
+    """Face identity (InstantID) and pose reference (OpenPose ControlNet) assets."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    families: tuple[ModelFamily, ...] = ("sdxl",)
+    download_size_gb: float | None = Field(default=None, gt=0)
+    instantid: InstantIdAsset
+    face_models: FaceModelsAsset
+    pose_controlnet: ControlNetAsset
+    pose_detector: PoseDetectorAsset
+
+    def files(self) -> list[tuple[str, str, str | None]]:
+        """(repo, filename, revision) of every file needed, for downloads and cache checks."""
+        i, f, p, d = self.instantid, self.face_models, self.pose_controlnet, self.pose_detector
+        cn = f"{p.subfolder}/" if p.subfolder else ""
+        return [
+            (i.repo, f"{i.controlnet_subfolder}/config.json", i.revision),
+            (i.repo, f"{i.controlnet_subfolder}/diffusion_pytorch_model.safetensors", i.revision),
+            (i.repo, i.adapter_weight_name, i.revision),
+            (f.repo, f.detection, f.revision),
+            (f.repo, f.recognition, f.revision),
+            (p.repo, f"{cn}config.json", p.revision),
+            (p.repo, f"{cn}diffusion_pytorch_model.safetensors", p.revision),
+            (d.repo, d.weight_name, d.revision),
+        ]
+
+
 class Catalog(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     default_model: str
     models: tuple[ModelEntry, ...] = Field(min_length=1)
     loras: tuple[LoraEntry, ...] = ()
+    identity: IdentityConfig | None = None
 
     @model_validator(mode="after")
     def _check(self) -> Catalog:

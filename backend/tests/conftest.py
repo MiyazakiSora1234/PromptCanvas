@@ -45,6 +45,14 @@ CATALOG = Catalog.model_validate(
             {"id": "pixel", "label": "Pixel", "repo": "test/pixel", "family": "sdxl", "default_scale": 0.8},
             {"id": "style15", "label": "Style15", "repo": "test/style15", "family": "sd15"},
         ],
+        "identity": {
+            "families": ["sdxl"],
+            "download_size_gb": 6.6,
+            "instantid": {"repo": "test/instantid"},
+            "face_models": {"repo": "test/faces", "detection": "det.onnx", "recognition": "rec.onnx"},
+            "pose_controlnet": {"repo": "test/openpose"},
+            "pose_detector": {"repo": "test/annotators", "weight_name": "body.pth"},
+        },
     }
 )
 
@@ -64,6 +72,10 @@ class FakeGenerator:
     @property
     def cached_models(self) -> frozenset[str]:
         return frozenset({"sd15"})
+
+    @property
+    def identity_cached(self) -> bool:
+        return False
 
     def load(self) -> None:
         pass
@@ -94,8 +106,8 @@ def image_data_url(size: tuple[int, int] = (64, 48), fmt: str = "PNG") -> str:
 def make_client() -> Iterator[Callable[..., TestClient]]:
     clients: list[TestClient] = []
 
-    def _make(generator: FakeGenerator | None = None, **overrides: Any) -> TestClient:
-        app = create_app(make_settings(**overrides), generator or FakeGenerator(), CATALOG)
+    def _make(generator: FakeGenerator | None = None, catalog: Catalog = CATALOG, **overrides: Any) -> TestClient:
+        app = create_app(make_settings(**overrides), generator or FakeGenerator(), catalog)
         client = TestClient(app)
         client.__enter__()  # run lifespan (creates the limiter)
         clients.append(client)

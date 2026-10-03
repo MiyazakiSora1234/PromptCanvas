@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from PIL import Image
 from pydantic import ValidationError
@@ -287,6 +288,57 @@ def test_is_model_cached_when_absent_or_local(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(model_cache, "try_to_load_from_cache", lambda *a, **k: None)
     assert model_cache.is_model_cached("org/missing") is False
     assert model_cache.is_model_cached(str(tmp_path)) is True  # a local directory is always available
+
+
+# --- Identity (InstantID) helpers -------------------------------------------------
+
+
+def test_identity_files_cover_every_asset() -> None:
+    assert CATALOG.identity is not None
+    files = CATALOG.identity.files()
+    assert ("test/instantid", "ip-adapter.bin", None) in files
+    assert ("test/instantid", "ControlNetModel/diffusion_pytorch_model.safetensors", None) in files
+    assert ("test/faces", "det.onnx", None) in files
+    assert ("test/annotators", "body.pth", None) in files
+    assert len(files) == 8
+
+
+def test_draw_kps_renders_keypoints_at_their_positions() -> None:
+    pytest.importorskip("cv2")
+    from app.identity import draw_kps
+
+    kps = np.array([[30, 40], [70, 40], [50, 60], [35, 80], [65, 80]], dtype=np.float32)
+    img = draw_kps((100, 120), kps)
+    assert img.size == (100, 120)
+    pixels = np.asarray(img)
+    assert pixels[40, 30].tolist() == [255, 0, 0]  # left eye, full-color dot
+    assert pixels[5, 5].tolist() == [0, 0, 0]  # background stays black
+
+
+def test_identity_tokens_follow_the_guidance_batch_layout() -> None:
+    torch = pytest.importorskip("torch")
+    from app.identity import _IdentityTokens
+
+    tokens = _IdentityTokens()
+    tokens.cond = torch.ones(1, 16, 8)
+    tokens.uncond = torch.zeros(1, 16, 8)
+    tokens.batch = 2
+    with_cfg = tokens.for_batch(4)  # [uncond, uncond, cond, cond]
+    assert with_cfg.shape == (4, 16, 8)
+    assert with_cfg[:2].sum() == 0 and bool((with_cfg[2:] == 1).all())
+    assert bool((tokens.for_batch(2) == 1).all())  # no CFG: cond only
+
+    seen: dict[str, Any] = {}
+
+    class FakeNet:
+        def forward(self, *args: Any, **kwargs: Any) -> str:
+            seen.update(kwargs)
+            return "ok"
+
+    net = FakeNet()
+    tokens.patch(net)
+    assert net.forward(sample=torch.zeros(4, 4), timestep=1, encoder_hidden_states="text") == "ok"
+    assert seen["encoder_hidden_states"].shape == (4, 16, 8)
 
 
 def test_hf_token_is_not_exposed_in_repr() -> None:

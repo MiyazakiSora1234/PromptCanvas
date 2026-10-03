@@ -22,5 +22,5 @@ plugins = ["pydantic.mypy"]
 files = ["app"]
 
 [[tool.mypy.overrides]]
-module = ["torch", "torch.*", "diffusers", "diffusers.*"]
+module = ["torch", "torch.*", "diffusers", "diffusers.*", "insightface.*", "controlnet_aux.*"]
 ignore_missing_imports = true

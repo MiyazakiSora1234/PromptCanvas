@@ -9,6 +9,8 @@ export interface Health {
   model: string | null;
   /** Models already downloaded (selecting others triggers a multi-GB download). */
   cached_models: string[];
+  /** Face/pose reference assets downloaded. */
+  identity_cached: boolean;
   device: string | null;
   dtype: string | null;
   message: string | null;
@@ -34,6 +36,14 @@ export interface Limits {
   max_lora_scale: number;
   min_quality: number;
   max_quality: number;
+  min_control_strength: number;
+  max_control_strength: number;
+}
+
+export interface IdentityOption {
+  /** Model families that support face/pose references (InstantID is SDXL-only). */
+  families: string[];
+  download_size_gb: number | null;
 }
 
 export interface ModelDefaults {
@@ -80,7 +90,16 @@ export interface AppConfig {
   schedulers: Option[];
   loras: LoraOption[];
   output_formats: FormatOption[];
-  defaults: { num_images: number; output_format: OutputFormat; quality: number; strength: number };
+  /** null when the server has face/pose references disabled. */
+  identity: IdentityOption | null;
+  defaults: {
+    num_images: number;
+    output_format: OutputFormat;
+    quality: number;
+    strength: number;
+    identity_strength: number;
+    pose_strength: number;
+  };
 }
 
 export interface LoraRequest {
@@ -104,6 +123,10 @@ export interface GenerateRequest {
   init_image: string | null;
   strength: number;
   loras: LoraRequest[];
+  face_image: string | null;
+  pose_image: string | null;
+  identity_strength: number;
+  pose_strength: number;
 }
 
 export interface GeneratedImageData {

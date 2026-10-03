@@ -21,6 +21,8 @@ _HARD_IMAGE_CAP = 70_000_000  # base64 characters (~50MB decoded)
 MIN_STRENGTH, MAX_STRENGTH, DEFAULT_STRENGTH = 0.1, 1.0, 0.6
 MIN_LORA_SCALE, MAX_LORA_SCALE = 0.0, 2.0
 MIN_QUALITY, MAX_QUALITY, DEFAULT_QUALITY = 1, 100, 90
+MIN_CONTROL_STRENGTH, MAX_CONTROL_STRENGTH = 0.0, 1.5
+DEFAULT_IDENTITY_STRENGTH, DEFAULT_POSE_STRENGTH = 0.8, 0.9
 
 
 class LoraRequest(BaseModel):
@@ -52,6 +54,14 @@ class GenerateRequest(BaseModel):
     )
     strength: float = DEFAULT_STRENGTH
     loras: list[LoraRequest] = Field(default_factory=list, max_length=10)
+    face_image: str | None = Field(
+        default=None, max_length=_HARD_IMAGE_CAP, description="顔を保つ人物の画像（InstantID、SDXL 系のみ）"
+    )
+    pose_image: str | None = Field(
+        default=None, max_length=_HARD_IMAGE_CAP, description="ポーズ参考画像（OpenPose ControlNet、SDXL 系のみ）"
+    )
+    identity_strength: float = DEFAULT_IDENTITY_STRENGTH
+    pose_strength: float = DEFAULT_POSE_STRENGTH
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,14 @@ class GenerationParams:
     init_image: Image.Image | None
     strength: float
     loras: tuple[tuple[LoraEntry, float], ...]
+    face_image: Image.Image | None = None
+    pose_image: Image.Image | None = None
+    identity_strength: float = DEFAULT_IDENTITY_STRENGTH
+    pose_strength: float = DEFAULT_POSE_STRENGTH
+
+    @property
+    def uses_reference(self) -> bool:
+        return self.face_image is not None or self.pose_image is not None
 
 
 def _in_range(value: float, low: float, high: float) -> bool:
@@ -129,16 +147,41 @@ def build_params(req: GenerateRequest, settings: Settings, catalog: Catalog) -> 
     if not MIN_QUALITY <= req.quality <= MAX_QUALITY:
         fail("quality", f"{MIN_QUALITY}〜{MAX_QUALITY}の範囲で指定してください。")
 
+    max_bytes = settings.max_init_image_mb * 1024 * 1024
+
+    def decode(field: str, data: str) -> Image.Image | None:
+        try:
+            return decode_base64_image(data, max_bytes=max_bytes)
+        except ImageDecodeError as exc:
+            fail(field, str(exc))
+            return None
+
     init_image: Image.Image | None = None
     if req.init_image:
         if not _in_range(req.strength, MIN_STRENGTH, MAX_STRENGTH):
             fail("strength", f"{MIN_STRENGTH:g}〜{MAX_STRENGTH:g}の範囲で指定してください。")
         elif int(steps * req.strength) < 1:
             fail("strength", "ステップ数 × 変換強度が 1 以上になるようにしてください。")
-        try:
-            init_image = decode_base64_image(req.init_image, max_bytes=settings.max_init_image_mb * 1024 * 1024)
-        except ImageDecodeError as exc:
-            fail("init_image", str(exc))
+        init_image = decode("init_image", req.init_image)
+
+    face_image: Image.Image | None = None
+    pose_image: Image.Image | None = None
+    if req.face_image or req.pose_image:
+        identity = catalog.identity
+        field = "face_image" if req.face_image else "pose_image"
+        if identity is None:
+            fail(field, "このサーバーでは顔・ポーズの参照機能が有効になっていません。")
+        elif model.family not in identity.families:
+            fail(field, f"顔・ポーズの参照は SDXL 系のモデルでのみ使えます（選択中: {model.label}）。")
+        if req.init_image:
+            fail(field, "img2img（元画像から生成）と顔・ポーズの参照は同時に使えません。どちらかを外してください。")
+        for name, control in (("identity_strength", req.identity_strength), ("pose_strength", req.pose_strength)):
+            if not _in_range(control, MIN_CONTROL_STRENGTH, MAX_CONTROL_STRENGTH):
+                fail(name, f"{MIN_CONTROL_STRENGTH:g}〜{MAX_CONTROL_STRENGTH:g}の範囲で指定してください。")
+        if req.face_image:
+            face_image = decode("face_image", req.face_image)
+        if req.pose_image:
+            pose_image = decode("pose_image", req.pose_image)
 
     loras: list[tuple[LoraEntry, float]] = []
     if len(req.loras) > settings.max_loras:
@@ -181,6 +224,10 @@ def build_params(req: GenerateRequest, settings: Settings, catalog: Catalog) -> 
         init_image=init_image,
         strength=req.strength,
         loras=tuple(loras),
+        face_image=face_image,
+        pose_image=pose_image,
+        identity_strength=req.identity_strength,
+        pose_strength=req.pose_strength,
     )
 
 
@@ -236,6 +283,7 @@ class HealthResponse(BaseModel):
     status: str = Field(description="not_loaded | loading | ready | failed")
     model: str | None = Field(description="読み込み済み（または読み込み中）のモデル ID")
     cached_models: list[str] = Field(description="ダウンロード済みで、すぐ読み込めるモデル ID")
+    identity_cached: bool = Field(description="顔・ポーズ参照に必要なモデルがダウンロード済みか")
     device: str | None
     dtype: str | None
     message: str | None
@@ -261,6 +309,13 @@ class Limits(BaseModel):
     max_lora_scale: float
     min_quality: int
     max_quality: int
+    min_control_strength: float
+    max_control_strength: float
+
+
+class IdentityOption(BaseModel):
+    families: list[str]
+    download_size_gb: float | None
 
 
 class ModelDefaultsModel(BaseModel):
@@ -304,6 +359,8 @@ class Defaults(BaseModel):
     output_format: OutputFormat
     quality: int
     strength: float
+    identity_strength: float
+    pose_strength: float
 
 
 class ConfigResponse(BaseModel):
@@ -313,6 +370,7 @@ class ConfigResponse(BaseModel):
     schedulers: list[Option]
     loras: list[LoraOption]
     output_formats: list[FormatOption]
+    identity: IdentityOption | None = Field(description="顔・ポーズ参照（null なら無効）")
     defaults: Defaults
 
     @classmethod
@@ -337,6 +395,8 @@ class ConfigResponse(BaseModel):
                 max_lora_scale=MAX_LORA_SCALE,
                 min_quality=MIN_QUALITY,
                 max_quality=MAX_QUALITY,
+                min_control_strength=MIN_CONTROL_STRENGTH,
+                max_control_strength=MAX_CONTROL_STRENGTH,
             ),
             default_model=catalog.default_model,
             models=[
@@ -366,5 +426,19 @@ class ConfigResponse(BaseModel):
                 FormatOption(id=k, label=v.label, lossy=v.lossy, extension=v.extension)
                 for k, v in OUTPUT_FORMATS.items()
             ],
-            defaults=Defaults(num_images=1, output_format="png", quality=DEFAULT_QUALITY, strength=DEFAULT_STRENGTH),
+            identity=(
+                IdentityOption(
+                    families=list(catalog.identity.families), download_size_gb=catalog.identity.download_size_gb
+                )
+                if catalog.identity
+                else None
+            ),
+            defaults=Defaults(
+                num_images=1,
+                output_format="png",
+                quality=DEFAULT_QUALITY,
+                strength=DEFAULT_STRENGTH,
+                identity_strength=DEFAULT_IDENTITY_STRENGTH,
+                pose_strength=DEFAULT_POSE_STRENGTH,
+            ),
         )

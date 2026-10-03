@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { CONFIG } from "../test/fixtures";
-import type { InitImage } from "./images";
-import { initialFormState, validateForm, type FormState, type FormValues, type LoraSelection } from "./validation";
+import type { PickedImage } from "./images";
+import { initialFormState, validateForm, type FormState, type FormValues } from "./validation";
 
-const IMAGE: InitImage = { dataUrl: "data:image/png;base64,AAAA", name: "a.png", width: 64, height: 64, bytes: 3 };
+const IMAGE: PickedImage = { dataUrl: "data:image/png;base64,AAAA", name: "a.png", width: 64, height: 64, bytes: 3 };
 
 function state(
   overrides: Partial<FormValues> = {},
-  extra: { loras?: LoraSelection[]; initImage?: InitImage | null } = {},
+  extra: Partial<Pick<FormState, "loras" | "initImage" | "faceImage" | "poseImage">> = {},
 ): FormState {
   const base = initialFormState(CONFIG);
   return {
     values: { ...base.values, prompt: "a cat", ...overrides },
     loras: extra.loras ?? [],
     initImage: extra.initImage ?? null,
+    faceImage: extra.faceImage ?? null,
+    poseImage: extra.poseImage ?? null,
   };
 }
 
@@ -38,8 +40,36 @@ describe("validateForm", () => {
         init_image: null,
         strength: 0.6,
         loras: [],
+        face_image: null,
+        pose_image: null,
+        identity_strength: 0.8,
+        pose_strength: 0.9,
       },
     });
+  });
+
+  it("includes face/pose references for SDXL models", () => {
+    const result = validateForm(
+      state({ model: "sdxl", identity_strength: "1.1" }, { faceImage: IMAGE, poseImage: IMAGE }),
+      CONFIG,
+    );
+    expect(result.ok && result.payload).toMatchObject({
+      face_image: IMAGE.dataUrl,
+      pose_image: IMAGE.dataUrl,
+      identity_strength: 1.1,
+      pose_strength: 0.9,
+    });
+  });
+
+  it("rejects references on unsupported models, with img2img, or with bad strengths", () => {
+    const sd15 = validateForm(state({}, { faceImage: IMAGE }), CONFIG);
+    expect(!sd15.ok && sd15.errors.face_image).toContain("SDXL");
+    const withInit = validateForm(state({ model: "sdxl" }, { poseImage: IMAGE, initImage: IMAGE }), CONFIG);
+    expect(!withInit.ok && withInit.errors.pose_image).toContain("同時に使えません");
+    const strong = validateForm(state({ model: "sdxl", pose_strength: "2" }, { poseImage: IMAGE }), CONFIG);
+    expect(!strong.ok && strong.errors.pose_strength).toBeTruthy();
+    const noConfig = validateForm(state({ model: "sdxl" }, { faceImage: IMAGE }), { ...CONFIG, identity: null });
+    expect(noConfig.ok).toBe(false);
   });
 
   it("includes img2img and LoRA settings", () => {

@@ -4,6 +4,7 @@ import {
   compatibleLoras,
   findModel,
   FIELD_NAMES,
+  supportsReference,
   type FieldErrors,
   type FormState,
   type FormValues,
@@ -11,6 +12,7 @@ import {
 } from "../lib/validation";
 import { InitImagePicker } from "./InitImagePicker";
 import { LoraPicker } from "./LoraPicker";
+import { ReferencePicker } from "./ReferencePicker";
 import { buttonClass, inputClass, primaryButtonClass } from "./styles";
 import { Alert, Field, Panel } from "./ui";
 
@@ -34,6 +36,10 @@ interface GenerateFormProps {
   onLorasChange: (loras: LoraSelection[]) => void;
   onInitImageFile: (file: File) => void;
   onInitImageClear: () => void;
+  onReferenceFile: (kind: "face" | "pose", file: File) => void;
+  onReferenceClear: (kind: "face" | "pose") => void;
+  /** Face/pose assets downloaded; null while unknown. */
+  identityCached: boolean | null;
   advancedOpen: boolean;
   onAdvancedOpenChange: (open: boolean) => void;
   onSubmit: () => void;
@@ -55,6 +61,9 @@ export function GenerateForm({
   onLorasChange,
   onInitImageFile,
   onInitImageClear,
+  onReferenceFile,
+  onReferenceClear,
+  identityCached,
   advancedOpen,
   onAdvancedOpenChange,
   onSubmit,
@@ -164,9 +173,29 @@ export function GenerateForm({
           imageError={fieldErrors.init_image}
           strengthError={fieldErrors.strength}
           disabled={busy}
+          unavailableReason={
+            state.faceImage || state.poseImage
+              ? "顔・ポーズの参照と同時には使えません。参照画像を外すと選べます。"
+              : undefined
+          }
           onFile={onInitImageFile}
           onClear={onInitImageClear}
           onStrengthChange={(v) => onValueChange("strength", v)}
+        />
+
+        <ReferencePicker
+          config={config}
+          state={state}
+          supported={supportsReference(config, model)}
+          modelLabel={model.label}
+          assetsCached={identityCached}
+          fieldErrors={fieldErrors}
+          disabled={busy}
+          onFaceFile={(file) => onReferenceFile("face", file)}
+          onPoseFile={(file) => onReferenceFile("pose", file)}
+          onClearFace={() => onReferenceClear("face")}
+          onClearPose={() => onReferenceClear("pose")}
+          onValueChange={onValueChange}
         />
 
         <div className="grid grid-cols-2 gap-3">

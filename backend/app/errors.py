@@ -57,6 +57,12 @@ class LoraUnavailableError(AppError):
     default_message = "LoRA を読み込めませんでした。LoRA を外すか、サーバーのログと設定を確認してください。"
 
 
+class ReferenceUnavailableError(AppError):
+    status_code = 503
+    code = "reference_unavailable"
+    default_message = "顔・ポーズ参照用のモデルを読み込めませんでした。サーバーのログと設定を確認してください。"
+
+
 class ServerBusyError(AppError):
     status_code = 429
     code = "server_busy"

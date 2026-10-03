@@ -77,6 +77,10 @@ describe("App", () => {
         init_image: null,
         strength: 0.6,
         loras: [],
+        face_image: null,
+        pose_image: null,
+        identity_strength: 0.8,
+        pose_strength: 0.9,
       },
     ]);
   });
@@ -236,9 +240,58 @@ describe("App", () => {
       height: 384,
     });
 
-    await user.click(screen.getByRole("button", { name: "外す" }));
+    await user.click(screen.getByRole("button", { name: "元画像を外す" }));
     expect(screen.queryByAltText("元画像のプレビュー")).not.toBeInTheDocument();
     expect(screen.getByLabelText("幅")).toHaveValue(512);
+  });
+
+  it("keeps a face and copies a pose with SDXL models", async () => {
+    const { generateCalls } = mockServer();
+    const user = await renderReady();
+
+    // SD 1.5 can't use references.
+    expect(screen.getByText(/「SD 1.5」では使えません/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("顔の写真ファイル")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
+    await user.upload(screen.getByLabelText("顔の写真ファイル"), new File(["f"], "me.png", { type: "image/png" }));
+    await user.upload(screen.getByLabelText("ポーズ参考画像ファイル"), new File(["p"], "pose.png", { type: "image/png" }));
+
+    expect(await screen.findByAltText("顔の写真のプレビュー")).toBeInTheDocument();
+    expect(screen.getByAltText("ポーズ参考画像のプレビュー")).toBeInTheDocument();
+    expect(screen.getByLabelText(/顔の再現度/)).toHaveValue("0.8");
+    // img2img can't be combined with references.
+    expect(screen.getByText(/顔・ポーズの参照と同時には使えません/)).toBeInTheDocument();
+    // Output follows the pose image's aspect ratio at SDXL's pixel count.
+    expect(screen.getByLabelText("幅")).toHaveValue(1368);
+    expect(screen.getByLabelText("高さ")).toHaveValue(768);
+
+    await user.type(promptBox(), "a woman in a red dress");
+    await user.click(generateButton());
+    await screen.findByRole("img", { name: /生成画像/ });
+
+    expect(generateCalls[0]).toMatchObject({
+      model: "sdxl",
+      face_image: "data:image/png;base64,AAAA",
+      pose_image: "data:image/png;base64,AAAA",
+      identity_strength: 0.8,
+      pose_strength: 0.9,
+      init_image: null,
+    });
+    expect(screen.getByText("顔の参照")).toBeInTheDocument();
+
+    // Switching to a model without reference support drops the images.
+    await user.selectOptions(screen.getByLabelText("モデル"), "sd15");
+    await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
+    expect(screen.queryByAltText("顔の写真のプレビュー")).not.toBeInTheDocument();
+  });
+
+  it("warns that face/pose references need a first-time download", async () => {
+    mockServer({ status: { ...health(), identity_cached: false } });
+    const user = await renderReady();
+
+    await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
+    expect(screen.getByText(/約6.6GB の追加モデルのダウンロード/)).toBeInTheDocument();
   });
 
   it("disables generation while the model is loading", async () => {

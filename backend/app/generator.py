@@ -21,17 +21,20 @@ from typing import Any, Protocol
 from .catalog import Catalog, LoraEntry, ModelEntry
 from .config import SEED_MAX, Settings
 from .errors import (
+    AppError,
     ConfigurationError,
     ContentFilteredError,
     GenerationFailedError,
     LoraUnavailableError,
     ModelLoadingError,
     ModelUnavailableError,
+    ReferenceUnavailableError,
     describe_load_error,
     is_out_of_memory,
 )
+from .identity import IdentityConditioner
 from .imaging import OUTPUT_FORMATS, encode_image, fit_to
-from .model_cache import is_model_cached
+from .model_cache import are_files_cached, is_model_cached
 from .schedulers import build_scheduler
 from .schemas import GenerationParams
 
@@ -86,6 +89,11 @@ class ImageGenerator(Protocol):
         """Catalog ids whose weights are already on disk (usable without a download)."""
         ...
 
+    @property
+    def identity_cached(self) -> bool:
+        """Whether the face/pose reference assets are already on disk."""
+        ...
+
     def load(self) -> None: ...
 
     def generate(self, params: GenerationParams) -> GenerationResult: ...
@@ -135,6 +143,8 @@ class _LoadedModel:
     img2img: Any
     original_scheduler: Any
     loras: set[str] = field(default_factory=set)
+    # InstantID's IP-Adapter is patched into the shared UNet only while it is needed.
+    ip_adapter_loaded: bool = False
 
 
 class DiffusersGenerator:
@@ -147,6 +157,8 @@ class DiffusersGenerator:
         self._loaded: _LoadedModel | None = None
         self._status = ModelStatus(ModelState.NOT_LOADED, model=catalog.default_model)
         self._cached: frozenset[str] = frozenset()
+        self._identity_cached = False
+        self._identity: IdentityConditioner | None = None
         self._status_lock = threading.Lock()
         # Diffusers pipelines are not thread-safe, and model switching must not overlap a run.
         self._run_lock = threading.Lock()
@@ -160,6 +172,10 @@ class DiffusersGenerator:
     def cached_models(self) -> frozenset[str]:
         with self._status_lock:
             return self._cached
+
+    @property
+    def identity_cached(self) -> bool:
+        return self._identity_cached
 
     def _set_status(self, state: ModelState, model: str | None, message: str | None = None) -> None:
         with self._status_lock:
@@ -175,6 +191,8 @@ class DiffusersGenerator:
         with self._status_lock:
             self._cached = self._cached | cached
         logger.info("Models available offline: %s", ", ".join(sorted(cached)) or "none")
+        if self._catalog.identity is not None:
+            self._identity_cached = are_files_cached(self._catalog.identity.files())
         # A failure is already logged and reflected in status.
         with self._run_lock, contextlib.suppress(ModelUnavailableError):
             self._ensure_model(self._catalog.default)
@@ -215,6 +233,10 @@ class DiffusersGenerator:
             self._set_status(ModelState.FAILED, entry.id, hint)
             raise ModelUnavailableError(f"モデル「{entry.label}」を読み込めませんでした。{hint}") from None
 
+        identity = self._catalog.identity
+        if self._identity is not None and identity is not None and entry.family not in identity.families:
+            self._identity.release()  # its ControlNets only fit other model families; free the VRAM
+            self._release_gpu_memory()
         self._loaded = loaded
         self._set_status(ModelState.READY, entry.id)
         logger.info("Model ready: %s", entry.id)
@@ -248,7 +270,8 @@ class DiffusersGenerator:
         text2img.set_progress_bar_config(disable=True)
 
         # Shares every component (no extra memory) with the text-to-image pipeline.
-        img2img = img2img_cls.from_pipe(text2img)
+        # from_pipe casts the shared components to float32 unless a dtype is given.
+        img2img = img2img_cls.from_pipe(text2img, torch_dtype=kwargs["torch_dtype"])
         img2img.set_progress_bar_config(disable=True)
         return _LoadedModel(entry, text2img, img2img, original_scheduler=text2img.scheduler)
 
@@ -289,15 +312,82 @@ class DiffusersGenerator:
         elif loaded.loras:
             pipe.disable_lora()
 
+    # --- Face / pose reference (InstantID + OpenPose) --------------------------
+
+    def _identity_conditioner(self) -> IdentityConditioner:
+        if self._identity is None:
+            assert self._catalog.identity is not None  # request validation guarantees this
+            token = self._settings.hf_token.get_secret_value() if self._settings.hf_token else None
+            dtype = getattr(self._torch, str(self._dtype_name))
+            self._identity = IdentityConditioner(self._catalog.identity, str(self._device), dtype, token)
+        return self._identity
+
+    def _sync_ip_adapter(self, loaded: _LoadedModel, needed: bool) -> None:
+        """Patch InstantID's adapter into the UNet only for face requests (it changes every attention layer)."""
+        pipe = loaded.text2img
+        if needed and not loaded.ip_adapter_loaded:
+            logger.info("Loading InstantID adapter into %s", loaded.entry.id)
+            state = self._identity_conditioner().adapter_state()
+            pipe.load_ip_adapter(state, subfolder="", weight_name="", image_encoder_folder=None)
+            # The adapter's projection/attention weights arrive as float32; match the UNet's dtype.
+            pipe.unet.to(dtype=getattr(self._torch, str(self._dtype_name)))
+            loaded.ip_adapter_loaded = True
+        elif not needed and loaded.ip_adapter_loaded:
+            pipe.unload_ip_adapter()
+            loaded.ip_adapter_loaded = False
+
+    def _reference_pipeline(self, loaded: _LoadedModel, params: GenerationParams) -> tuple[Any, dict[str, Any]]:
+        from diffusers import StableDiffusionXLControlNetPipeline
+        from diffusers.models.controlnets.multicontrolnet import MultiControlNetModel
+
+        try:
+            setup = self._identity_conditioner().prepare(
+                loaded.text2img.unet,
+                face_image=params.face_image,
+                pose_image=params.pose_image,
+                width=params.width,
+                height=params.height,
+                identity_strength=params.identity_strength,
+                pose_strength=params.pose_strength,
+                num_images=params.num_images,
+                guidance=params.guidance_scale > 1,
+            )
+        except AppError:
+            self._identity_conditioner().park()  # e.g. no face found after the nets moved to the GPU
+            raise
+        except Exception as exc:
+            self._identity_conditioner().park()
+            hint = describe_load_error(exc)
+            logger.exception("Failed to prepare face/pose reference. %s", hint)
+            raise ReferenceUnavailableError(f"顔・ポーズ参照用のモデルを読み込めませんでした。{hint}") from None
+
+        cls: Any = StableDiffusionXLControlNetPipeline  # diffusers is only partially typed
+        # from_pipe casts the shared components to float32 unless a dtype is given.
+        dtype = getattr(self._torch, str(self._dtype_name))
+        pipe = cls.from_pipe(loaded.text2img, controlnet=MultiControlNetModel(setup.controlnets), torch_dtype=dtype)
+        pipe.set_progress_bar_config(disable=True)
+        extra: dict[str, Any] = {"image": setup.images, "controlnet_conditioning_scale": setup.scales}
+        if setup.ip_adapter_embeds is not None:
+            loaded.text2img.set_ip_adapter_scale(params.identity_strength)
+            extra["ip_adapter_image_embeds"] = [setup.ip_adapter_embeds]
+        return pipe, extra
+
     # --- Generation ----------------------------------------------------------
 
     def generate(self, params: GenerationParams) -> GenerationResult:
         with self._run_lock:
             loaded = self._ensure_model(params.model)
             self._apply_loras(loaded, params.loras)
+            self._sync_ip_adapter(loaded, needed=params.face_image is not None)
             torch = self._torch
 
-            pipe = loaded.img2img if params.init_image is not None else loaded.text2img
+            extra: dict[str, Any] = {}
+            if params.uses_reference:
+                pipe, extra = self._reference_pipeline(loaded, params)
+            elif params.init_image is not None:
+                pipe = loaded.img2img
+            else:
+                pipe = loaded.text2img
             pipe.scheduler = build_scheduler(params.scheduler, loaded.original_scheduler)
             if self._settings.enable_cpu_offload and self._device == "cuda":
                 pipe.enable_model_cpu_offload()  # (re)install hooks on the pipeline actually used
@@ -320,6 +410,7 @@ class DiffusersGenerator:
             else:
                 kwargs["width"] = params.width
                 kwargs["height"] = params.height
+            kwargs.update(extra)
 
             try:
                 with torch.inference_mode():
@@ -328,6 +419,10 @@ class DiffusersGenerator:
                 if is_out_of_memory(exc):
                     self._release_gpu_memory()
                 raise
+            finally:
+                if params.uses_reference and self._identity is not None:
+                    self._identity.park()
+                    self._release_gpu_memory()
 
         images = getattr(output, "images", None)
         if not images:

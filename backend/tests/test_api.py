@@ -13,7 +13,7 @@ from PIL import Image
 from app.errors import ContentFilteredError, LoraUnavailableError
 from app.generator import ModelState
 
-from .conftest import FakeGenerator, image_data_url
+from .conftest import CATALOG, FakeGenerator, image_data_url
 
 MakeClient = Callable[..., TestClient]
 
@@ -32,6 +32,7 @@ def test_health_reports_ready(make_client: MakeClient) -> None:
     assert body["status"] == "ready"
     assert body["model"] == "sd15"
     assert body["cached_models"] == ["sd15"]
+    assert body["identity_cached"] is False
     assert body["queue"] == {"running": 0, "waiting": 0, "max_waiting": 4}
     assert "X-Request-ID" in res.headers
 
@@ -46,6 +47,8 @@ def test_config_exposes_catalog_and_limits(make_client: MakeClient) -> None:
     assert {"default", "euler_a", "dpmpp_2m_karras"} <= {s["id"] for s in body["schedulers"]}
     assert [lora["id"] for lora in body["loras"]] == ["pixel", "style15"]
     assert [f["id"] for f in body["output_formats"]] == ["png", "jpeg", "webp"]
+    assert body["identity"] == {"families": ["sdxl"], "download_size_gb": 6.6}
+    assert body["limits"]["max_control_strength"] == 1.5
     # Repository names are server-side details, never exposed.
     assert "test/sdxl" not in str(body)
 
@@ -141,6 +144,44 @@ def test_loras_are_resolved_with_default_scale(make_client: MakeClient) -> None:
     assert (lora.id, scale) == ("pixel", 0.8)
 
 
+def test_face_and_pose_reference_are_passed_to_the_generator(make_client: MakeClient) -> None:
+    gen = FakeGenerator()
+    res = make_client(gen).post(
+        "/api/generate",
+        json={
+            "prompt": "a woman in a red dress, dancing",
+            "model": "sdxl",
+            "face_image": image_data_url((80, 80)),
+            "pose_image": image_data_url((60, 90)),
+            "identity_strength": 1.0,
+            "pose_strength": 0.5,
+        },
+    )
+    assert res.status_code == 200
+    params = gen.calls[0]
+    assert params.uses_reference
+    assert params.face_image is not None and params.face_image.size == (80, 80)
+    assert params.pose_image is not None and params.pose_image.size == (60, 90)
+    assert (params.identity_strength, params.pose_strength) == (1.0, 0.5)
+
+
+def test_reference_is_sdxl_only(make_client: MakeClient) -> None:
+    res = make_client().post("/api/generate", json={"prompt": "a", "face_image": image_data_url()})
+    [field] = res.json()["error"]["fields"]
+    assert field["field"] == "face_image"
+    assert "SDXL" in field["message"]
+
+
+def test_reference_disabled_without_catalog_entry(make_client: MakeClient) -> None:
+    catalog = CATALOG.model_copy(update={"identity": None})
+    client = make_client(catalog=catalog)
+    assert client.get("/api/config").json()["identity"] is None
+    res = client.post("/api/generate", json={"prompt": "a", "model": "sdxl", "pose_image": image_data_url()})
+    [field] = res.json()["error"]["fields"]
+    assert field["field"] == "pose_image"
+    assert "有効になっていません" in field["message"]
+
+
 # --- validation -----------------------------------------------------------------
 
 
@@ -175,6 +216,14 @@ def test_loras_are_resolved_with_default_scale(make_client: MakeClient) -> None:
         ({"prompt": "a", "loras": [{"id": "pixel"}]}, "loras"),  # SDXL LoRA on the SD1.5 model
         ({"prompt": "a", "loras": [{"id": "style15", "scale": 3}]}, "loras"),
         ({"prompt": "a", "loras": [{"id": "style15"}, {"id": "style15"}]}, "loras"),
+        ({"prompt": "a", "model": "sdxl", "face_image": "not base64!"}, "face_image"),
+        ({"prompt": "a", "model": "sdxl", "pose_image": base64.b64encode(b"x").decode()}, "pose_image"),
+        ({"prompt": "a", "model": "sdxl", "face_image": image_data_url(), "identity_strength": 2}, "identity_strength"),
+        ({"prompt": "a", "model": "sdxl", "pose_image": image_data_url(), "pose_strength": -0.1}, "pose_strength"),
+        (
+            {"prompt": "a", "model": "sdxl", "face_image": image_data_url(), "init_image": image_data_url()},
+            "face_image",
+        ),
     ],
 )
 def test_generate_rejects_invalid_input(make_client: MakeClient, payload: dict[str, object], field: str) -> None:

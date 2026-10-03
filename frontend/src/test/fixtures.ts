@@ -20,6 +20,8 @@ export const CONFIG: AppConfig = {
     max_lora_scale: 2,
     min_quality: 1,
     max_quality: 100,
+    min_control_strength: 0,
+    max_control_strength: 1.5,
   },
   default_model: "sd15",
   models: [
@@ -60,7 +62,8 @@ export const CONFIG: AppConfig = {
     { id: "jpeg", label: "JPEG", lossy: true, extension: "jpg" },
     { id: "webp", label: "WebP", lossy: true, extension: "webp" },
   ],
-  defaults: { num_images: 1, output_format: "png", quality: 90, strength: 0.6 },
+  identity: { families: ["sdxl"], download_size_gb: 6.6 },
+  defaults: { num_images: 1, output_format: "png", quality: 90, strength: 0.6, identity_strength: 0.8, pose_strength: 0.9 },
 };
 
 export function health(status: Health["status"] = "ready", model = "sd15"): Health {
@@ -68,6 +71,7 @@ export function health(status: Health["status"] = "ready", model = "sd15"): Heal
     status,
     model,
     cached_models: ["sd15"],
+    identity_cached: true,
     device: "cuda",
     dtype: "float16",
     message: status === "failed" ? "モデルが見つかりません。" : null,
