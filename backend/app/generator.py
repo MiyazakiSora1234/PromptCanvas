@@ -20,6 +20,7 @@ from .errors import (
     ContentFilteredError,
     GenerationFailedError,
     ModelLoadingError,
+    ModelUnavailableError,
     describe_load_error,
     is_out_of_memory,
 )
@@ -42,6 +43,14 @@ class ModelStatus:
     dtype: str | None = None
     # Safe, fixed hint text (never raw exception output).
     message: str | None = None
+
+    def ensure_ready(self) -> None:
+        """Raise the user-facing error for any state other than READY."""
+        if self.state in (ModelState.NOT_LOADED, ModelState.LOADING):
+            raise ModelLoadingError()
+        if self.state is ModelState.FAILED:
+            detail = f"（{self.message}）" if self.message else ""
+            raise ModelUnavailableError(ModelUnavailableError.default_message + detail)
 
 
 @dataclass(frozen=True)

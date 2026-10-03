@@ -88,6 +88,17 @@ class GenerationFailedError(AppError):
     )
 
 
+class HttpError(AppError):
+    """Framework-level HTTP errors (unknown route, wrong method, ...)."""
+
+    default_message = "リクエストされたリソースが見つからないか、許可されていない操作です。"
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__()
+        self.status_code = status_code
+        self.code = "not_found" if status_code == 404 else "http_error"
+
+
 class ConfigurationError(Exception):
     """Invalid device/dtype configuration detected while loading. Message is safe to show."""
 
