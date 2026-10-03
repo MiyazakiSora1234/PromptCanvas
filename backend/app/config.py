@@ -32,10 +32,11 @@ class Settings(BaseSettings):
         protected_namespaces=(),
     )
 
-    # --- Model -----------------------------------------------------------
-    model_id: str = "stable-diffusion-v1-5/stable-diffusion-v1-5"
-    model_revision: str | None = None
-    model_variant: str | None = None
+    # --- Models ----------------------------------------------------------
+    # Allow-list of selectable models and LoRAs (see catalog.json).
+    catalog_path: Path = BACKEND_DIR / "catalog.json"
+    # Catalog id loaded at startup; empty = the catalog's "default_model".
+    default_model: str | None = None
     # Only needed for gated/private models. Never logged or returned in responses.
     hf_token: SecretStr | None = Field(
         default=None,
@@ -48,16 +49,17 @@ class Settings(BaseSettings):
     enable_attention_slicing: bool = False
     enable_cpu_offload: bool = False
 
-    # --- Input limits and defaults ----------------------------------------
+    # --- Input limits (per-model defaults live in catalog.json) ------------
     min_image_size: int = Field(default=256, ge=64)
-    max_image_size: int = Field(default=1024, le=2048)
-    default_width: int = 512
-    default_height: int = 512
+    max_image_size: int = Field(default=1536, le=2048)
     max_steps: int = Field(default=50, ge=1, le=200)
-    default_steps: int = Field(default=25, ge=1)
     max_guidance_scale: float = Field(default=20.0, ge=0)
-    default_guidance_scale: float = Field(default=7.5, ge=0)
     max_prompt_length: int = Field(default=1000, ge=1, le=10_000)
+    # Images per request; each one costs time and VRAM.
+    max_batch_size: int = Field(default=4, ge=1, le=16)
+    max_loras: int = Field(default=3, ge=0, le=10)
+    # img2img upload limit (decoded bytes).
+    max_init_image_mb: int = Field(default=10, ge=1, le=50)
 
     # --- Concurrency -----------------------------------------------------
     # One pipeline instance runs one generation at a time; these bound the queue behind it.
@@ -75,14 +77,7 @@ class Settings(BaseSettings):
     def _check_consistency(self) -> Settings:
         if self.min_image_size > self.max_image_size:
             raise ValueError("min_image_size must be <= max_image_size")
-        for name in ("min_image_size", "max_image_size", "default_width", "default_height"):
+        for name in ("min_image_size", "max_image_size"):
             if getattr(self, name) % SIZE_MULTIPLE:
                 raise ValueError(f"{name} must be a multiple of {SIZE_MULTIPLE}")
-        for name in ("default_width", "default_height"):
-            if not self.min_image_size <= getattr(self, name) <= self.max_image_size:
-                raise ValueError(f"{name} must be within [min_image_size, max_image_size]")
-        if self.default_steps > self.max_steps:
-            raise ValueError("default_steps must be <= max_steps")
-        if self.default_guidance_scale > self.max_guidance_scale:
-            raise ValueError("default_guidance_scale must be <= max_guidance_scale")
         return self

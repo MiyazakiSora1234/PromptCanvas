@@ -1,29 +1,38 @@
-"""Diffusers pipeline wrapper: loads the model once and generates PNG images.
+"""Diffusers pipeline wrapper.
 
-``torch`` and ``diffusers`` are imported lazily inside :meth:`DiffusersGenerator.load`
-so that the API layer and tests can run without them installed.
+Keeps exactly one catalog model on the device at a time (switching on demand),
+and serves text-to-image and image-to-image from the same weights.
+
+``torch`` and ``diffusers`` are imported lazily so that the API layer and tests
+can run without them installed.
 """
 
 from __future__ import annotations
 
-import io
+import contextlib
+import gc
 import logging
 import secrets
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
+from .catalog import Catalog, LoraEntry, ModelEntry
 from .config import SEED_MAX, Settings
 from .errors import (
     ConfigurationError,
     ContentFilteredError,
     GenerationFailedError,
+    LoraUnavailableError,
     ModelLoadingError,
     ModelUnavailableError,
     describe_load_error,
     is_out_of_memory,
 )
+from .imaging import OUTPUT_FORMATS, encode_image, fit_to
+from .model_cache import is_model_cached
+from .schedulers import build_scheduler
 from .schemas import GenerationParams
 
 logger = logging.getLogger(__name__)
@@ -39,29 +48,43 @@ class ModelState(StrEnum):
 @dataclass(frozen=True)
 class ModelStatus:
     state: ModelState
+    model: str | None = None  # catalog id loaded / being loaded / that failed
     device: str | None = None
     dtype: str | None = None
     # Safe, fixed hint text (never raw exception output).
     message: str | None = None
 
     def ensure_ready(self) -> None:
-        """Raise the user-facing error for any state other than READY."""
+        """Reject requests while a model is being loaded.
+
+        A FAILED state does not block: the next request retries the load (or picks
+        another model), and reports the failure itself if it happens again.
+        """
         if self.state in (ModelState.NOT_LOADED, ModelState.LOADING):
             raise ModelLoadingError()
-        if self.state is ModelState.FAILED:
-            detail = f"（{self.message}）" if self.message else ""
-            raise ModelUnavailableError(ModelUnavailableError.default_message + detail)
+
+
+@dataclass(frozen=True)
+class GeneratedImage:
+    data: bytes
+    mime_type: str
+    seed: int
 
 
 @dataclass(frozen=True)
 class GenerationResult:
-    png: bytes
-    seed: int
+    images: list[GeneratedImage]
+    filtered_count: int = 0
 
 
 class ImageGenerator(Protocol):
     @property
     def status(self) -> ModelStatus: ...
+
+    @property
+    def cached_models(self) -> frozenset[str]:
+        """Catalog ids whose weights are already on disk (usable without a download)."""
+        ...
 
     def load(self) -> None: ...
 
@@ -95,15 +118,37 @@ def resolve_dtype(requested: str, device: str) -> str:
     return requested
 
 
+def batch_seeds(seed: int | None, count: int) -> list[int]:
+    """One seed per image: the given (or a random) seed, then +1, +2, ... wrapping at 2^32."""
+    base = seed if seed is not None else secrets.randbelow(SEED_MAX + 1)
+    return [(base + i) % (SEED_MAX + 1) for i in range(count)]
+
+
+def adapter_name(lora: LoraEntry) -> str:
+    return lora.id.replace("-", "_")
+
+
+@dataclass
+class _LoadedModel:
+    entry: ModelEntry
+    text2img: Any
+    img2img: Any
+    original_scheduler: Any
+    loras: set[str] = field(default_factory=set)
+
+
 class DiffusersGenerator:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, catalog: Catalog) -> None:
         self._settings = settings
-        self._pipe: Any = None
+        self._catalog = catalog
         self._torch: Any = None
-        self._status = ModelStatus(ModelState.NOT_LOADED)
+        self._device: str | None = None
+        self._dtype_name: str | None = None
+        self._loaded: _LoadedModel | None = None
+        self._status = ModelStatus(ModelState.NOT_LOADED, model=catalog.default_model)
+        self._cached: frozenset[str] = frozenset()
         self._status_lock = threading.Lock()
-        # Diffusers pipelines are not thread-safe; serialize calls even if the
-        # limiter is ever configured to allow more than one.
+        # Diffusers pipelines are not thread-safe, and model switching must not overlap a run.
         self._run_lock = threading.Lock()
 
     @property
@@ -111,83 +156,171 @@ class DiffusersGenerator:
         with self._status_lock:
             return self._status
 
-    def _set_status(self, status: ModelStatus) -> None:
+    @property
+    def cached_models(self) -> frozenset[str]:
         with self._status_lock:
-            self._status = status
+            return self._cached
+
+    def _set_status(self, state: ModelState, model: str | None, message: str | None = None) -> None:
+        with self._status_lock:
+            self._status = ModelStatus(state, model, self._device, self._dtype_name, message)
+            if state is ModelState.READY and model is not None:
+                self._cached = self._cached | {model}
+
+    # --- Loading -----------------------------------------------------------
 
     def load(self) -> None:
-        s = self._settings
-        self._set_status(ModelStatus(ModelState.LOADING))
+        """Load the default model (called once at startup, in a background thread)."""
+        cached = frozenset(m.id for m in self._catalog.models if is_model_cached(m.repo, m.revision))
+        with self._status_lock:
+            self._cached = self._cached | cached
+        logger.info("Models available offline: %s", ", ".join(sorted(cached)) or "none")
+        # A failure is already logged and reflected in status.
+        with self._run_lock, contextlib.suppress(ModelUnavailableError):
+            self._ensure_model(self._catalog.default)
+
+    def _init_runtime(self) -> None:
+        if self._torch is not None:
+            return
+        import torch
+
+        mps = getattr(torch.backends, "mps", None)
+        device = resolve_device(
+            self._settings.device,
+            cuda_available=torch.cuda.is_available(),
+            mps_available=bool(mps and mps.is_available()),
+        )
+        self._dtype_name = resolve_dtype(self._settings.torch_dtype, device)
+        self._device = device
+        self._torch = torch
+        if device == "cpu":
+            logger.warning("GPU が見つからないため CPU で実行します。1枚の生成に数分以上かかる場合があります。")
+        elif device == "cuda":
+            logger.info("CUDA device: %s", torch.cuda.get_device_name(0))
+
+    def _ensure_model(self, entry: ModelEntry) -> _LoadedModel:
+        """Return the loaded pipeline for `entry`, switching models if needed. Caller holds _run_lock."""
+        if self._loaded is not None and self._loaded.entry.id == entry.id:
+            return self._loaded
+
+        self._unload()
+        self._set_status(ModelState.LOADING, entry.id)
         try:
-            import torch
-            from diffusers import AutoPipelineForText2Image
-
-            mps = getattr(torch.backends, "mps", None)
-            device = resolve_device(
-                s.device,
-                cuda_available=torch.cuda.is_available(),
-                mps_available=bool(mps and mps.is_available()),
-            )
-            dtype_name = resolve_dtype(s.torch_dtype, device)
-            self._set_status(ModelStatus(ModelState.LOADING, device=device, dtype=dtype_name))
-            if device == "cpu":
-                logger.warning(
-                    "GPU が見つからないため CPU で実行します。1枚の生成に数分以上かかる場合があります。"
-                )
-            if device == "cuda":
-                logger.info("CUDA device: %s", torch.cuda.get_device_name(0))
-            logger.info("Loading model %s on %s (%s)...", s.model_id, device, dtype_name)
-
-            kwargs: dict[str, Any] = {"torch_dtype": getattr(torch, dtype_name)}
-            if s.model_revision:
-                kwargs["revision"] = s.model_revision
-            if s.model_variant:
-                kwargs["variant"] = s.model_variant
-            if s.hf_token is not None:
-                kwargs["token"] = s.hf_token.get_secret_value()
-
-            pipeline_cls: Any = AutoPipelineForText2Image  # diffusers is only partially typed
-            pipe = pipeline_cls.from_pretrained(s.model_id, **kwargs)
-            if s.enable_cpu_offload and device == "cuda":
-                pipe.enable_model_cpu_offload()
-            else:
-                if s.enable_cpu_offload:
-                    logger.warning("PROMPTCANVAS_ENABLE_CPU_OFFLOAD is only effective on CUDA; ignored.")
-                pipe = pipe.to(device)
-            if s.enable_attention_slicing:
-                pipe.enable_attention_slicing()
-            pipe.set_progress_bar_config(disable=True)
+            self._init_runtime()
+            loaded = self._load_pipelines(entry)
         except Exception as exc:
             hint = describe_load_error(exc)
-            logger.exception("Failed to load model %s. %s", s.model_id, hint)
-            self._set_status(replace(self.status, state=ModelState.FAILED, message=hint))
-            return
+            logger.exception("Failed to load model %s (%s). %s", entry.id, entry.repo, hint)
+            self._unload()
+            self._set_status(ModelState.FAILED, entry.id, hint)
+            raise ModelUnavailableError(f"モデル「{entry.label}」を読み込めませんでした。{hint}") from None
 
-        self._torch = torch
-        self._pipe = pipe
-        self._set_status(replace(self.status, state=ModelState.READY))
-        logger.info("Model ready.")
+        self._loaded = loaded
+        self._set_status(ModelState.READY, entry.id)
+        logger.info("Model ready: %s", entry.id)
+        return loaded
+
+    def _load_pipelines(self, entry: ModelEntry) -> _LoadedModel:
+        from diffusers import AutoPipelineForImage2Image, AutoPipelineForText2Image
+
+        s, torch = self._settings, self._torch
+        logger.info("Loading model %s (%s) on %s (%s)...", entry.id, entry.repo, self._device, self._dtype_name)
+        kwargs: dict[str, Any] = {"torch_dtype": getattr(torch, str(self._dtype_name))}
+        if entry.revision:
+            kwargs["revision"] = entry.revision
+        if entry.variant:
+            kwargs["variant"] = entry.variant
+        if s.hf_token is not None:
+            kwargs["token"] = s.hf_token.get_secret_value()
+
+        text2img_cls: Any = AutoPipelineForText2Image  # diffusers is only partially typed
+        img2img_cls: Any = AutoPipelineForImage2Image
+        text2img = text2img_cls.from_pretrained(entry.repo, **kwargs)
+        if not s.enable_cpu_offload or self._device != "cuda":
+            if s.enable_cpu_offload:
+                logger.warning("PROMPTCANVAS_ENABLE_CPU_OFFLOAD is only effective on CUDA; ignored.")
+            text2img = text2img.to(self._device)
+        if s.enable_attention_slicing:
+            text2img.enable_attention_slicing()
+        # Decode batches one image at a time: same output, much lower peak VRAM.
+        if hasattr(text2img, "vae") and hasattr(text2img.vae, "enable_slicing"):
+            text2img.vae.enable_slicing()
+        text2img.set_progress_bar_config(disable=True)
+
+        # Shares every component (no extra memory) with the text-to-image pipeline.
+        img2img = img2img_cls.from_pipe(text2img)
+        img2img.set_progress_bar_config(disable=True)
+        return _LoadedModel(entry, text2img, img2img, original_scheduler=text2img.scheduler)
+
+    def _unload(self) -> None:
+        if self._loaded is None:
+            return
+        logger.info("Unloading model %s", self._loaded.entry.id)
+        self._loaded = None
+        gc.collect()
+        self._release_gpu_memory()
+
+    # --- LoRA --------------------------------------------------------------
+
+    def _apply_loras(self, loaded: _LoadedModel, loras: tuple[tuple[LoraEntry, float], ...]) -> None:
+        pipe = loaded.text2img  # img2img shares the same UNet/text encoders, so adapters apply to both
+        for lora, _ in loras:
+            if lora.id in loaded.loras:
+                continue
+            logger.info("Loading LoRA %s (%s)", lora.id, lora.repo)
+            kwargs: dict[str, Any] = {"adapter_name": adapter_name(lora)}
+            if lora.weight_name:
+                kwargs["weight_name"] = lora.weight_name
+            if lora.revision:
+                kwargs["revision"] = lora.revision
+            if self._settings.hf_token is not None:
+                kwargs["token"] = self._settings.hf_token.get_secret_value()
+            try:
+                pipe.load_lora_weights(lora.repo, **kwargs)
+            except Exception as exc:
+                hint = describe_load_error(exc)
+                logger.exception("Failed to load LoRA %s. %s", lora.id, hint)
+                raise LoraUnavailableError(f"LoRA「{lora.label}」を読み込めませんでした。{hint}") from None
+            loaded.loras.add(lora.id)
+
+        if loras:
+            pipe.enable_lora()
+            pipe.set_adapters([adapter_name(lora) for lora, _ in loras], adapter_weights=[w for _, w in loras])
+        elif loaded.loras:
+            pipe.disable_lora()
+
+    # --- Generation ----------------------------------------------------------
 
     def generate(self, params: GenerationParams) -> GenerationResult:
-        pipe, torch = self._pipe, self._torch
-        if pipe is None or torch is None:
-            raise ModelLoadingError()
-
-        seed = params.seed if params.seed is not None else secrets.randbelow(SEED_MAX + 1)
-        # A CPU generator gives the same image for the same seed regardless of device.
-        rng = torch.Generator(device="cpu").manual_seed(seed)
-        kwargs: dict[str, Any] = {
-            "prompt": params.prompt,
-            "width": params.width,
-            "height": params.height,
-            "num_inference_steps": params.num_inference_steps,
-            "guidance_scale": params.guidance_scale,
-            "generator": rng,
-        }
-        if params.negative_prompt:
-            kwargs["negative_prompt"] = params.negative_prompt
-
         with self._run_lock:
+            loaded = self._ensure_model(params.model)
+            self._apply_loras(loaded, params.loras)
+            torch = self._torch
+
+            pipe = loaded.img2img if params.init_image is not None else loaded.text2img
+            pipe.scheduler = build_scheduler(params.scheduler, loaded.original_scheduler)
+            if self._settings.enable_cpu_offload and self._device == "cuda":
+                pipe.enable_model_cpu_offload()  # (re)install hooks on the pipeline actually used
+
+            seeds = batch_seeds(params.seed, params.num_images)
+            # CPU generators give the same image for the same seed regardless of device.
+            generators = [torch.Generator(device="cpu").manual_seed(s) for s in seeds]
+            kwargs: dict[str, Any] = {
+                "prompt": params.prompt,
+                "num_inference_steps": params.num_inference_steps,
+                "guidance_scale": params.guidance_scale,
+                "num_images_per_prompt": params.num_images,
+                "generator": generators,
+            }
+            if params.negative_prompt:
+                kwargs["negative_prompt"] = params.negative_prompt
+            if params.init_image is not None:
+                kwargs["image"] = fit_to(params.init_image, params.width, params.height)
+                kwargs["strength"] = params.strength
+            else:
+                kwargs["width"] = params.width
+                kwargs["height"] = params.height
+
             try:
                 with torch.inference_mode():
                     output = pipe(**kwargs)
@@ -199,13 +332,17 @@ class DiffusersGenerator:
         images = getattr(output, "images", None)
         if not images:
             raise GenerationFailedError()
-        nsfw = getattr(output, "nsfw_content_detected", None)
-        if nsfw and nsfw[0]:
-            raise ContentFilteredError()
+        nsfw = getattr(output, "nsfw_content_detected", None) or [False] * len(images)
 
-        buffer = io.BytesIO()
-        images[0].save(buffer, format="PNG")
-        return GenerationResult(png=buffer.getvalue(), seed=seed)
+        spec = OUTPUT_FORMATS[params.output_format]
+        kept = [
+            GeneratedImage(encode_image(img, params.output_format, params.quality), spec.mime_type, seed)
+            for img, seed, flagged in zip(images, seeds, nsfw, strict=False)
+            if not flagged
+        ]
+        if not kept:
+            raise ContentFilteredError()
+        return GenerationResult(images=kept, filtered_count=len(images) - len(kept))
 
     def _release_gpu_memory(self) -> None:
         torch = self._torch

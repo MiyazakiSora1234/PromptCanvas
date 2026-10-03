@@ -51,6 +51,12 @@ class ModelUnavailableError(AppError):
     default_message = "モデルを利用できないため画像を生成できません。サーバーのログと設定を確認してください。"
 
 
+class LoraUnavailableError(AppError):
+    status_code = 503
+    code = "lora_unavailable"
+    default_message = "LoRA を読み込めませんでした。LoRA を外すか、サーバーのログと設定を確認してください。"
+
+
 class ServerBusyError(AppError):
     status_code = 429
     code = "server_busy"

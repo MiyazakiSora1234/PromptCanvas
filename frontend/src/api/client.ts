@@ -1,4 +1,4 @@
-import type { ApiErrorBody, AppConfig, FieldErrorItem, GenerateRequest, GeneratedImage, Health } from "./types";
+import type { ApiErrorBody, AppConfig, FieldErrorItem, GenerateRequest, GenerateResponse, Health } from "./types";
 
 // Empty = same origin (FastAPI serves the build; Vite proxies /api in development).
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
@@ -73,27 +73,21 @@ export async function fetchHealth(signal?: AbortSignal): Promise<Health> {
   return (await res.json()) as Health;
 }
 
-export async function generateImage(payload: GenerateRequest, signal?: AbortSignal): Promise<GeneratedImage> {
+export async function generateImages(payload: GenerateRequest, signal?: AbortSignal): Promise<GenerateResponse> {
   const res = await request("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     signal,
   });
-  const blob = await res.blob();
-  if (blob.type !== "image/png") {
+  const body = (await res.json()) as Partial<GenerateResponse>;
+  if (!Array.isArray(body.images) || body.images.length === 0) {
     throw new ApiError(res.status, {
       code: "unexpected_response",
-      message: "サーバーから画像以外の応答が返されました。時間をおいて再度お試しください。",
+      message: "サーバーから画像が返されませんでした。時間をおいて再度お試しください。",
       fields: [],
       request_id: null,
     });
   }
-  const seed = res.headers.get("X-Seed");
-  const elapsed = res.headers.get("X-Generation-Time-Ms");
-  return {
-    blob,
-    seed: seed !== null ? Number(seed) : (payload.seed ?? Number.NaN),
-    elapsedMs: elapsed !== null ? Number(elapsed) : null,
-  };
+  return body as GenerateResponse;
 }

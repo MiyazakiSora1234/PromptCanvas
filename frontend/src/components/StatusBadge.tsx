@@ -1,3 +1,4 @@
+import type { ModelOption } from "../api/types";
 import type { ServerStatus } from "../hooks/useServerStatus";
 
 type Tone = "neutral" | "ok" | "warn" | "error";
@@ -9,7 +10,7 @@ const TONE_CLASSES: Record<Tone, string> = {
   error: "border-red-600 text-red-700 dark:border-red-400 dark:text-red-300",
 };
 
-function describe(status: ServerStatus): { text: string; tone: Tone; title?: string } {
+function describe(status: ServerStatus, models: ModelOption[]): { text: string; tone: Tone; title?: string } {
   switch (status.kind) {
     case "unknown":
       return { text: "サーバーに接続中…", tone: "neutral" };
@@ -17,21 +18,22 @@ function describe(status: ServerStatus): { text: string; tone: Tone; title?: str
       return { text: "サーバーに接続できません", tone: "error" };
     case "online": {
       const { health } = status;
+      const model = models.find((m) => m.id === health.model)?.label ?? health.model ?? "モデル";
       if (health.status === "ready") {
         const device = health.device === "cuda" ? "GPU (CUDA)" : health.device === "mps" ? "GPU (MPS)" : "CPU";
         const slow = health.device === "cpu" ? "・生成に時間がかかります" : "";
-        return { text: `準備完了：${device}${slow}`, tone: "ok", title: `${health.model_id} / ${health.dtype ?? ""}` };
+        return { text: `準備完了：${model}・${device}${slow}`, tone: "ok", title: health.dtype ?? undefined };
       }
       if (health.status === "failed") {
-        return { text: "モデルの読み込みに失敗しました", tone: "error", title: health.message ?? undefined };
+        return { text: `${model} の読み込みに失敗しました`, tone: "error", title: health.message ?? undefined };
       }
-      return { text: "モデル読み込み中…（初回はダウンロードに時間がかかります）", tone: "warn" };
+      return { text: `${model} を読み込み中…（初回はダウンロードに時間がかかります）`, tone: "warn" };
     }
   }
 }
 
-export function StatusBadge({ status }: { status: ServerStatus }) {
-  const { text, tone, title } = describe(status);
+export function StatusBadge({ status, models }: { status: ServerStatus; models: ModelOption[] }) {
+  const { text, tone, title } = describe(status, models);
   return (
     <p
       role="status"

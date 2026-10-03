@@ -1,0 +1,45 @@
+{
+  "default_model": "sd15",
+  "models": [
+    {
+      "id": "sd15",
+      "label": "Stable Diffusion 1.5（汎用）",
+      "description": "軽量で高速。512px が基本サイズ。",
+      "repo": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+      "family": "sd15",
+      "download_size_gb": 5.1,
+      "defaults": { "width": 512, "height": 512, "num_inference_steps": 25, "guidance_scale": 7.5, "scheduler": "default" }
+    },
+    {
+      "id": "sdxl",
+      "label": "SDXL 1.0（高画質・写真風）",
+      "description": "1024px で高精細。VRAM 10GB 以上推奨。",
+      "repo": "stabilityai/stable-diffusion-xl-base-1.0",
+      "variant": "fp16",
+      "family": "sdxl",
+      "download_size_gb": 6.9,
+      "defaults": { "width": 1024, "height": 1024, "num_inference_steps": 30, "guidance_scale": 7.0, "scheduler": "default" }
+    },
+    {
+      "id": "animagine-xl",
+      "label": "Animagine XL 4.0（イラスト・アニメ）",
+      "description": "アニメ・イラスト調に特化（SDXL 系）。タグ形式のプロンプトが得意。",
+      "repo": "cagliostrolab/animagine-xl-4.0",
+      "family": "sdxl",
+      "download_size_gb": 6.5,
+      "defaults": { "width": 832, "height": 1216, "num_inference_steps": 28, "guidance_scale": 5.0, "scheduler": "euler_a" }
+    }
+  ],
+  "loras": [
+    {
+      "id": "pixel-art-xl",
+      "label": "Pixel Art XL",
+      "description": "ドット絵風にする LoRA。",
+      "repo": "nerijs/pixel-art-xl",
+      "weight_name": "pixel-art-xl.safetensors",
+      "family": "sdxl",
+      "trigger_words": "pixel art",
+      "default_scale": 1.0
+    }
+  ]
+}

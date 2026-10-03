@@ -1,36 +1,101 @@
 // Client-side validation. Mirrors backend/app/schemas.py#build_params; the server
 // re-validates everything, this only gives faster feedback.
-import type { Defaults, GenerateRequest, Limits } from "../api/types";
+import type { AppConfig, GenerateRequest, LoraOption, ModelOption, OutputFormat } from "../api/types";
+import type { InitImage } from "./images";
 
+/** Text-like inputs, in on-screen order (used to focus the first invalid one). */
 export const FIELD_NAMES = [
+  "model",
   "prompt",
+  "init_image",
+  "strength",
+  "num_images",
+  "output_format",
+  "quality",
   "negative_prompt",
+  "scheduler",
   "width",
   "height",
   "num_inference_steps",
   "guidance_scale",
   "seed",
+  "loras",
 ] as const;
 
 export type FieldName = (typeof FIELD_NAMES)[number];
 
 /** Raw input strings, as typed by the user. */
-export type FormValues = Record<FieldName, string>;
+export type FormValues = Record<Exclude<FieldName, "init_image" | "loras">, string>;
+
+export interface LoraSelection {
+  id: string;
+  scale: number;
+}
+
+export interface FormState {
+  values: FormValues;
+  loras: LoraSelection[];
+  initImage: InitImage | null;
+}
 
 /** Keyed by field name; may also contain server-side names such as "body". */
 export type FieldErrors = Partial<Record<string, string>>;
 
 export type ValidationResult = { ok: true; payload: GenerateRequest } | { ok: false; errors: FieldErrors };
 
-export function initialFormValues(defaults: Defaults): FormValues {
+/** Fields (other than prompt) that live inside the collapsible "詳細設定" section. */
+const ADVANCED_FIELDS = new Set<string>([
+  "negative_prompt",
+  "scheduler",
+  "width",
+  "height",
+  "num_inference_steps",
+  "guidance_scale",
+  "seed",
+  "quality",
+]);
+
+export function hasAdvancedFieldError(errors: FieldErrors): boolean {
+  return Object.keys(errors).some((name) => ADVANCED_FIELDS.has(name));
+}
+
+export function findModel(config: AppConfig, id: string): ModelOption {
+  return config.models.find((m) => m.id === id) ?? config.models[0]!;
+}
+
+export function compatibleLoras(config: AppConfig, model: ModelOption): LoraOption[] {
+  return config.loras.filter((lora) => lora.family === model.family);
+}
+
+/** The values a model starts with; also applied when the user switches models. */
+export function modelDefaultValues(model: ModelOption): Pick<
+  FormValues,
+  "model" | "scheduler" | "width" | "height" | "num_inference_steps" | "guidance_scale"
+> {
   return {
-    prompt: "",
-    negative_prompt: "",
-    width: String(defaults.width),
-    height: String(defaults.height),
-    num_inference_steps: String(defaults.num_inference_steps),
-    guidance_scale: String(defaults.guidance_scale),
-    seed: "",
+    model: model.id,
+    scheduler: model.defaults.scheduler,
+    width: String(model.defaults.width),
+    height: String(model.defaults.height),
+    num_inference_steps: String(model.defaults.num_inference_steps),
+    guidance_scale: String(model.defaults.guidance_scale),
+  };
+}
+
+export function initialFormState(config: AppConfig): FormState {
+  return {
+    values: {
+      ...modelDefaultValues(findModel(config, config.default_model)),
+      prompt: "",
+      negative_prompt: "",
+      seed: "",
+      num_images: String(config.defaults.num_images),
+      output_format: config.defaults.output_format,
+      quality: String(config.defaults.quality),
+      strength: String(config.defaults.strength),
+    },
+    loras: [],
+    initImage: null,
   };
 }
 
@@ -39,7 +104,14 @@ function parseInteger(raw: string): number | null {
   return /^-?\d+$/.test(text) ? Number(text) : null;
 }
 
-export function validateForm(values: FormValues, limits: Limits): ValidationResult {
+function parseNumber(raw: string): number {
+  const text = raw.trim();
+  return text === "" ? Number.NaN : Number(text);
+}
+
+export function validateForm(state: FormState, config: AppConfig): ValidationResult {
+  const { values, initImage } = state;
+  const { limits } = config;
   const errors: FieldErrors = {};
 
   const prompt = values.prompt.trim();
@@ -50,6 +122,11 @@ export function validateForm(values: FormValues, limits: Limits): ValidationResu
   const negativePrompt = values.negative_prompt.trim();
   if (negativePrompt.length > limits.max_prompt_length)
     errors.negative_prompt = `${limits.max_prompt_length}文字以内で入力してください。`;
+
+  const model = config.models.find((m) => m.id === values.model);
+  if (!model) errors.model = "モデルを選んでください。";
+
+  if (!config.schedulers.some((s) => s.id === values.scheduler)) errors.scheduler = "サンプラーを選んでください。";
 
   const size = (key: "width" | "height"): number => {
     const n = parseInteger(values[key]);
@@ -67,8 +144,7 @@ export function validateForm(values: FormValues, limits: Limits): ValidationResu
   else if (steps < limits.min_steps || steps > limits.max_steps)
     errors.num_inference_steps = `${limits.min_steps}〜${limits.max_steps}の範囲で指定してください。`;
 
-  const guidanceText = values.guidance_scale.trim();
-  const guidance = guidanceText === "" ? Number.NaN : Number(guidanceText);
+  const guidance = parseNumber(values.guidance_scale);
   if (!Number.isFinite(guidance)) errors.guidance_scale = "数値で入力してください。";
   else if (guidance < limits.min_guidance_scale || guidance > limits.max_guidance_scale)
     errors.guidance_scale = `${limits.min_guidance_scale}〜${limits.max_guidance_scale}の範囲で指定してください。`;
@@ -81,22 +157,58 @@ export function validateForm(values: FormValues, limits: Limits): ValidationResu
     }
   }
 
+  const numImages = parseInteger(values.num_images);
+  if (numImages === null || numImages < 1 || numImages > limits.max_batch_size)
+    errors.num_images = `1〜${limits.max_batch_size}枚の範囲で指定してください。`;
+
+  const format = config.output_formats.find((f) => f.id === values.output_format);
+  if (!format) errors.output_format = "画像形式を選んでください。";
+
+  const quality = parseInteger(values.quality);
+  if (format?.lossy && (quality === null || quality < limits.min_quality || quality > limits.max_quality))
+    errors.quality = `${limits.min_quality}〜${limits.max_quality}の整数で指定してください。`;
+
+  const strength = parseNumber(values.strength);
+  if (initImage) {
+    if (!Number.isFinite(strength) || strength < limits.min_strength || strength > limits.max_strength)
+      errors.strength = `${limits.min_strength}〜${limits.max_strength}の範囲で指定してください。`;
+    else if (steps !== null && Math.floor(steps * strength) < 1)
+      errors.strength = "ステップ数 × 変換強度が 1 以上になるようにしてください。";
+  }
+
+  if (state.loras.length > limits.max_loras) errors.loras = `LoRA は${limits.max_loras}個まで選択できます。`;
+  for (const selection of state.loras) {
+    const lora = config.loras.find((l) => l.id === selection.id);
+    if (!lora || (model && lora.family !== model.family)) {
+      errors.loras = `LoRA「${lora?.label ?? selection.id}」は選択中のモデルでは使えません。`;
+    } else if (
+      !Number.isFinite(selection.scale) ||
+      selection.scale < limits.min_lora_scale ||
+      selection.scale > limits.max_lora_scale
+    ) {
+      errors.loras = `LoRA の強さは${limits.min_lora_scale}〜${limits.max_lora_scale}の範囲で指定してください。`;
+    }
+  }
+
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
     ok: true,
     payload: {
       prompt,
       negative_prompt: negativePrompt,
+      model: values.model,
+      scheduler: values.scheduler,
       width,
       height,
       num_inference_steps: steps ?? 0,
       guidance_scale: guidance,
       seed,
+      num_images: numImages ?? 1,
+      output_format: values.output_format as OutputFormat,
+      quality: quality ?? config.defaults.quality,
+      init_image: initImage?.dataUrl ?? null,
+      strength: Number.isFinite(strength) ? strength : config.defaults.strength,
+      loras: state.loras.map(({ id, scale }) => ({ id, scale })),
     },
   };
-}
-
-/** True when an error belongs to a field inside the collapsible "詳細設定" section. */
-export function hasAdvancedFieldError(errors: FieldErrors): boolean {
-  return Object.keys(errors).some((name) => name !== "prompt");
 }

@@ -6,5 +6,6 @@ pydantic-settings>=2.4,<3
 diffusers>=0.32
 transformers>=4.44
 accelerate>=0.33
+peft>=0.15  # LoRA
 safetensors>=0.4
 pillow>=10.4

@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { generateImage } from "../api/client";
-import type { GenerateRequest } from "../api/types";
+import { generateImages } from "../api/client";
+import type { GenerateRequest, GenerateResponse } from "../api/types";
+import { base64ToBlob, buildFileName } from "../lib/images";
 
-export interface GenerationResult {
-  /** Object URL of the PNG; revoked automatically when replaced or on unmount. */
+export interface ResultImage {
+  /** Object URL; revoked automatically when the result is replaced or on unmount. */
   url: string;
   fileName: string;
   seed: number;
-  elapsedMs: number | null;
-  params: GenerateRequest;
 }
 
-export function buildFileName(seed: number, now = new Date()): string {
-  const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\..+/, "");
-  return `promptcanvas_${stamp}_seed${seed}.png`;
+export interface GenerationResult {
+  images: ResultImage[];
+  response: Omit<GenerateResponse, "images">;
+  request: GenerateRequest;
 }
+
+const EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 
 /**
  * Runs one generation at a time. A second call while one is in flight is ignored,
@@ -30,28 +32,29 @@ export function useImageGeneration() {
   // Abort a pending request if the component goes away.
   useEffect(() => () => controllerRef.current?.abort(), []);
 
-  // Free the previous image's memory whenever it is replaced.
+  // Free the previous images' memory whenever they are replaced.
   useEffect(() => {
-    const url = result?.url;
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
+    const urls = result?.images.map((img) => img.url) ?? [];
+    return () => urls.forEach((url) => URL.revokeObjectURL(url));
   }, [result]);
 
-  const generate = useCallback(async (params: GenerateRequest): Promise<void> => {
+  const generate = useCallback(async (request: GenerateRequest): Promise<void> => {
     if (inFlight.current) return;
     inFlight.current = true;
     const controller = new AbortController();
     controllerRef.current = controller;
     setStartedAt(performance.now());
     try {
-      const image = await generateImage(params, controller.signal);
+      const { images, ...response } = await generateImages(request, controller.signal);
+      const now = new Date();
       setResult({
-        url: URL.createObjectURL(image.blob),
-        fileName: buildFileName(image.seed),
-        seed: image.seed,
-        elapsedMs: image.elapsedMs,
-        params,
+        images: images.map((img) => ({
+          url: URL.createObjectURL(base64ToBlob(img.data, img.mime_type)),
+          fileName: buildFileName(img.seed, EXTENSIONS[img.mime_type] ?? "img", now),
+          seed: img.seed,
+        })),
+        response,
+        request,
       });
     } finally {
       inFlight.current = false;

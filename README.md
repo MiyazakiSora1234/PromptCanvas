@@ -1,6 +1,17 @@
 # PromptCanvas
 
-Hugging Face Diffusers を使った画像生成 Web アプリです。ブラウザからプロンプトを入力して画像を生成し、画面で確認して PNG でダウンロードできます。
+Hugging Face Diffusers を使った画像生成 Web アプリです。ブラウザからプロンプトを入力して画像を生成し、画面で確認してダウンロードできます。
+
+主な機能：
+
+| 機能 | 内容 |
+| --- | --- |
+| モデル選択 | `catalog.json` に登録したモデル（既定: SD 1.5 / SDXL / Animagine XL）から選択。GPU に載せるのは常に 1 つで、選択に応じて入れ替え |
+| サンプラー | モデル既定 / Euler / Euler a / DPM++ 2M / DPM++ 2M Karras / UniPC / DDIM |
+| バッチ | 1 回で 1〜4 枚（シードは 1 枚ごとに +1）。サムネイルから選んで個別にダウンロード |
+| 画像形式 | PNG / JPEG / WebP（JPEG・WebP は画質を指定可） |
+| img2img | 画像をアップロードし、変換強度を指定して描き直し。出力サイズは元画像の縦横比に自動調整 |
+| LoRA | `catalog.json` に登録した LoRA を強さ付きで適用。モデルの系統（SD1.5 / SDXL）が合うものだけ選択可 |
 
 ```
 PromptCanvas/
@@ -11,10 +22,15 @@ PromptCanvas/
 │   │   ├── api.py               # /api のルート
 │   │   ├── error_handlers.py    # 例外 → エラー JSON への変換
 │   │   ├── config.py            # 環境変数による設定（pydantic-settings）
+│   │   ├── catalog.py           # catalog.json（選択可能なモデル・LoRA）の読み込みと検証
 │   │   ├── schemas.py           # リクエスト/レスポンス型とサーバー側入力検証
-│   │   ├── generator.py         # Diffusers パイプラインのロードと生成
+│   │   ├── generator.py         # モデルの入れ替え・txt2img/img2img・LoRA・バッチ生成
+│   │   ├── schedulers.py        # サンプラー一覧
+│   │   ├── imaging.py           # アップロード画像のデコード、PNG/JPEG/WebP エンコード
+│   │   ├── model_cache.py       # モデルがダウンロード済みかの判定
 │   │   ├── limiter.py           # 同時実行数と待ち行列の制御
 │   │   └── errors.py            # ユーザー向けエラーと例外の分類
+│   ├── catalog.json             # 選択可能なモデルと LoRA の許可リスト
 │   ├── scripts/download_model.py
 │   ├── tests/                   # pytest（GPU・torch 不要）
 │   ├── requirements.txt / requirements-dev.txt
@@ -132,19 +148,20 @@ npm run build      # frontend/dist に出力され、FastAPI が配信する
 
 | 変数 | 既定値 | 説明 |
 | --- | --- | --- |
-| `PROMPTCANVAS_MODEL_ID` | `stable-diffusion-v1-5/stable-diffusion-v1-5` | Hugging Face のモデル ID またはローカルパス |
-| `PROMPTCANVAS_MODEL_REVISION` | なし | ブランチ / タグ / コミット |
-| `PROMPTCANVAS_MODEL_VARIANT` | なし | `fp16` などの重みバリアント（存在するモデルのみ） |
+| `PROMPTCANVAS_CATALOG_PATH` | `backend/catalog.json` | 選択可能なモデル・LoRA の一覧 |
+| `PROMPTCANVAS_DEFAULT_MODEL` | カタログの `default_model` | 起動時に読み込むモデル（カタログの ID） |
 | `HF_TOKEN` | なし | ゲート付き・非公開モデル用のトークン。ログ・レスポンスには出力しません |
 | `PROMPTCANVAS_DEVICE` | `auto` | `auto` / `cuda` / `mps` / `cpu` |
 | `PROMPTCANVAS_TORCH_DTYPE` | `auto` | `auto`（GPU: float16 / CPU: float32）/ `float16` / `bfloat16` / `float32` |
 | `PROMPTCANVAS_ENABLE_ATTENTION_SLICING` | `false` | VRAM 節約（やや低速） |
 | `PROMPTCANVAS_ENABLE_CPU_OFFLOAD` | `false` | モデルを必要時のみ GPU に載せる（CUDA のみ、低速だが大幅に VRAM 節約） |
-| `PROMPTCANVAS_MIN_IMAGE_SIZE` / `MAX_IMAGE_SIZE` | `256` / `1024` | 幅・高さの範囲（8 の倍数） |
-| `PROMPTCANVAS_DEFAULT_WIDTH` / `DEFAULT_HEIGHT` | `512` / `512` | 既定サイズ |
-| `PROMPTCANVAS_MAX_STEPS` / `DEFAULT_STEPS` | `50` / `25` | ステップ数の上限と既定値 |
-| `PROMPTCANVAS_MAX_GUIDANCE_SCALE` / `DEFAULT_GUIDANCE_SCALE` | `20` / `7.5` | ガイダンススケールの上限と既定値 |
+| `PROMPTCANVAS_MIN_IMAGE_SIZE` / `MAX_IMAGE_SIZE` | `256` / `1536` | 幅・高さの範囲（8 の倍数） |
+| `PROMPTCANVAS_MAX_STEPS` | `50` | ステップ数の上限 |
+| `PROMPTCANVAS_MAX_GUIDANCE_SCALE` | `20` | ガイダンススケールの上限 |
 | `PROMPTCANVAS_MAX_PROMPT_LENGTH` | `1000` | プロンプト・ネガティブプロンプトの最大文字数 |
+| `PROMPTCANVAS_MAX_BATCH_SIZE` | `4` | 1 回の生成枚数の上限（枚数に比例して時間と VRAM が増える） |
+| `PROMPTCANVAS_MAX_LORAS` | `3` | 同時に適用できる LoRA の数（`0` で LoRA 機能を非表示） |
+| `PROMPTCANVAS_MAX_INIT_IMAGE_MB` | `10` | img2img でアップロードできる画像の最大サイズ |
 | `PROMPTCANVAS_MAX_QUEUE_SIZE` | `4` | 生成中に待機できるリクエスト数。超えると 429 |
 | `PROMPTCANVAS_QUEUE_TIMEOUT_SECONDS` | `300` | 待機の上限秒数。超えると 503 |
 | `PROMPTCANVAS_CORS_ORIGINS` | `[]` | 別オリジンからアクセスする場合の許可リスト（JSON 配列） |
@@ -152,28 +169,57 @@ npm run build      # frontend/dist に出力され、FastAPI が配信する
 | `PROMPTCANVAS_FRONTEND_DIR` | `frontend/dist` | 配信するビルド成果物の場所。存在しなければ API のみ起動（警告ログ） |
 | `PROMPTCANVAS_LOG_LEVEL` | `INFO` | ログレベル |
 
-設定値の整合性（既定サイズが範囲内か、8 の倍数か等）は起動時に検証され、不正なら起動に失敗します。
+設定値と `catalog.json` の整合性（各モデルの既定サイズが範囲内か、8 の倍数か、既定サンプラーが存在するか等）は起動時に検証され、不正なら起動に失敗します。
 
-### モデルの例
+## モデルと LoRA（catalog.json）
 
-| モデル ID | 推奨設定 | VRAM 目安 |
-| --- | --- | --- |
-| `stable-diffusion-v1-5/stable-diffusion-v1-5`（既定） | 512×512、25 ステップ、ガイダンス 7.5 | 4GB〜 |
-| `stabilityai/stable-diffusion-xl-base-1.0` | `DEFAULT_WIDTH/HEIGHT=1024`、`MODEL_VARIANT=fp16` | 10GB〜 |
-| `stabilityai/sd-turbo` | `DEFAULT_STEPS=1`、`DEFAULT_GUIDANCE_SCALE=0`（ネガティブプロンプトは無効） | 4GB〜 |
+利用者が選べるのは `backend/catalog.json` に登録したものだけです（任意のリポジトリを指定させると、任意のダウンロードを引き起こせてしまうため）。画面・API にはカタログの `id` だけが公開され、リポジトリ名は公開されません。
+
+| モデル（id） | リポジトリ | 系統 | 基本サイズ | 容量 | 備考 |
+| --- | --- | --- | --- | --- | --- |
+| `sd15`（既定） | stable-diffusion-v1-5/stable-diffusion-v1-5 | sd15 | 512×512 | 約5GB | 軽量・高速。VRAM 4GB〜 |
+| `sdxl` | stabilityai/stable-diffusion-xl-base-1.0（fp16） | sdxl | 1024×1024 | 約7GB | 高画質・写真風。VRAM 10GB〜 |
+| `animagine-xl` | cagliostrolab/animagine-xl-4.0 | sdxl | 832×1216 | 約7GB | アニメ・イラスト調。推奨サンプラー Euler a |
+
+| LoRA（id） | リポジトリ | 系統 | 備考 |
+| --- | --- | --- | --- |
+| `pixel-art-xl` | nerijs/pixel-art-xl | sdxl | ドット絵風。プロンプトに `pixel art` を含めると効果的 |
+
+追加するときは次の形式で書きます（`family` が一致しない LoRA は画面に出ず、API でも拒否されます）。
+
+```json
+{
+  "models": [
+    {
+      "id": "my-model", "label": "表示名", "description": "説明",
+      "repo": "org/repo（またはローカルのディレクトリ）", "variant": "fp16", "family": "sdxl",
+      "download_size_gb": 6.9,
+      "defaults": { "width": 1024, "height": 1024, "num_inference_steps": 30, "guidance_scale": 7.0, "scheduler": "default" }
+    }
+  ],
+  "loras": [
+    { "id": "my-lora", "label": "表示名", "repo": "org/repo", "weight_name": "file.safetensors",
+      "family": "sdxl", "trigger_words": "trigger", "default_scale": 1.0 }
+  ]
+}
+```
+
+- モデルは diffusers 形式（`model_index.json` を含むリポジトリ）である必要があります。
+- GPU に載せるモデルは常に 1 つです。別のモデルを選ぶと入れ替えに数秒〜数十秒かかり、その間ほかのリクエストは「読み込み中」になります。
+- **未ダウンロードのモデルを選ぶと、初回の生成時に数 GB のダウンロードが走り、数分〜数十分待つことになります。** 画面ではモデル名に「（要ダウンロード）」と表示し、選ぶと警告を出します。事前に `make download-model` で取得しておくことを推奨します。
 
 ## モデルの取得
 
-初回起動時に `PROMPTCANVAS_MODEL_ID` のモデルを自動でダウンロードし、`~/.cache/huggingface/hub` にキャッシュします（2 回目以降はキャッシュを使用）。ダウンロード中も API は起動しており、画面上部に「モデル読み込み中…」と表示されます。
+起動時に既定モデルを、それ以外のモデル・LoRA は初めて使うときに自動でダウンロードし、`~/.cache/huggingface/hub` にキャッシュします（2 回目以降はキャッシュを使用）。ダウンロード中も API は起動しており、画面上部に「… を読み込み中」と表示されます。
 
-事前に取得しておく場合：
+使う予定のものは事前に取得しておくと、初回の待ち時間がなくなります（カタログ全体で約19GB）：
 
 ```powershell
-cd backend
-.venv\Scripts\python.exe -m scripts.download_model   # または make download-model
+make download-model                                    # カタログのモデル・LoRA をすべて
+cd backend; .venv\Scripts\python.exe -m scripts.download_model sdxl pixel-art-xl   # 一部だけ
 ```
 
-サーバーと同じ設定（`PROMPTCANVAS_MODEL_ID` / `REVISION` / `VARIANT` / `HF_TOKEN`）を使い、パイプラインに必要なファイルだけを取得します（リポジトリ内の不要な大容量 ckpt はダウンロードしません）。
+`catalog.json` と同じ設定（revision / variant / weight_name、`HF_TOKEN`）を使い、パイプラインに必要なファイルだけを取得します（リポジトリ内の不要な大容量 ckpt はダウンロードしません）。
 
 - ゲート付きモデル（例: SD3、FLUX.1-dev）は Hugging Face のモデルページで利用規約に同意し、`HF_TOKEN` を環境変数か `backend/.env` に設定してください。トークンはコードやリポジトリにコミットしないでください（`.env` は `.gitignore` 済み）。
 - 新しい `huggingface_hub` は Xet ストレージ経由でダウンロードし、受信データをメモリに溜めてから書き出します。そのためダウンロード中でもキャッシュフォルダのサイズが増えないことがあります（進行状況は `GET /api/health` が `loading` かどうかで確認）。
@@ -212,17 +258,43 @@ http://localhost:5173 を開くと、`frontend/src` の変更が即座に反映�
 
 | メソッド | パス | 内容 |
 | --- | --- | --- |
-| `GET` | `/api/health` | モデル状態（`loading` / `ready` / `failed`）、デバイス、待ち行列 |
-| `GET` | `/api/config` | 入力値の範囲と既定値（画面の検証に使用） |
-| `POST` | `/api/generate` | 画像生成。成功時は `image/png` を返し、`X-Seed` ヘッダに使用したシード値 |
+| `GET` | `/api/health` | モデル状態（`loading` / `ready` / `failed`）、読み込み中のモデル、ダウンロード済みモデル、デバイス、待ち行列 |
+| `GET` | `/api/config` | 入力値の範囲、選択肢（モデル・サンプラー・LoRA・画像形式）と各モデルの既定値 |
+| `POST` | `/api/generate` | 画像生成。画像は JSON 内に base64 で返す |
 
-リクエスト例：
+`POST /api/generate` のリクエスト（`prompt` 以外は省略可。省略時は選んだモデルの既定値）：
+
+```json
+{
+  "prompt": "a red fox in a forest",
+  "negative_prompt": "blurry",
+  "model": "sdxl",
+  "scheduler": "dpmpp_2m_karras",
+  "width": 1024, "height": 1024, "num_inference_steps": 30, "guidance_scale": 7.0,
+  "seed": 42,
+  "num_images": 2,
+  "output_format": "webp", "quality": 90,
+  "init_image": "data:image/png;base64,...", "strength": 0.6,
+  "loras": [{ "id": "pixel-art-xl", "scale": 1.0 }]
+}
+```
+
+レスポンス：
+
+```json
+{
+  "images": [{ "seed": 42, "mime_type": "image/webp", "data": "<base64>" }, { "seed": 43, "...": "..." }],
+  "model": "sdxl", "scheduler": "dpmpp_2m_karras", "width": 1024, "height": 1024,
+  "num_inference_steps": 30, "guidance_scale": 7.0, "output_format": "webp",
+  "elapsed_ms": 25148, "filtered_count": 0
+}
+```
+
+PowerShell から 1 枚保存する例：
 
 ```powershell
-curl.exe -X POST http://127.0.0.1:8000/api/generate `
-  -H "Content-Type: application/json" `
-  -d '{\"prompt\": \"a cat astronaut, digital art\", \"width\": 512, \"height\": 512, \"num_inference_steps\": 25, \"seed\": 42}' `
-  -o out.png -D -
+$r = Invoke-RestMethod http://127.0.0.1:8000/api/generate -Method Post -ContentType "application/json" -Body '{"prompt":"a cat astronaut, digital art","seed":42}'
+[IO.File]::WriteAllBytes("$PWD\out.png", [Convert]::FromBase64String($r.images[0].data))
 ```
 
 エラー時は次の形式の JSON を返します。`message` はユーザー向けの案内で、内部情報（例外メッセージ、パス、トークン）は含みません。詳細はサーバーログに `request_id` 付きで出力されます。
@@ -233,11 +305,12 @@ curl.exe -X POST http://127.0.0.1:8000/api/generate `
 
 | code | HTTP | 状況 |
 | --- | --- | --- |
-| `invalid_input` | 422 | 入力値が範囲外・形式不正（`fields` に項目別メッセージ） |
-| `content_filtered` | 422 | セーフティチェッカーが画像をブロック |
+| `invalid_input` | 422 | 入力値が範囲外・形式不正、カタログにないモデル/LoRA、系統の合わない LoRA、読めない画像（`fields` に項目別メッセージ） |
+| `content_filtered` | 422 | セーフティチェッカーが全画像をブロック（一部だけなら `filtered_count` で通知） |
 | `server_busy` | 429 | 待ち行列が満杯 |
 | `model_loading` | 503 | モデル読み込み中 |
-| `model_unavailable` | 503 | モデル読み込みに失敗（理由を `message` に表示） |
+| `model_unavailable` | 503 | モデル読み込みに失敗（理由を `message` に表示）。次のリクエストで再試行される |
+| `lora_unavailable` | 503 | LoRA の読み込みに失敗 |
 | `gpu_out_of_memory` | 503 | GPU メモリ不足（サイズ・ステップを下げるよう案内） |
 | `queue_timeout` | 503 | 待機時間の上限超過 |
 | `generation_failed` | 500 | その他の生成失敗 |
@@ -250,8 +323,8 @@ make check            # 以下をすべて実行
 
 | 対象 | コマンド | 内容 |
 | --- | --- | --- |
-| API | `pytest` / `ruff check .` / `mypy`（`backend/`） | 生成処理をフェイクに差し替えるため torch・GPU 不要。入力検証（空・範囲外・8 の倍数でない・型不正・未知の項目・不正 JSON）、PNG 応答とシードヘッダ、モデル読み込み中/失敗時の 503、GPU メモリ不足の判別、内部情報が応答に漏れないこと、待ち行列の満杯・タイムアウト、デバイス/dtype 解決、設定値の整合性 |
-| 画面 | `npm test` / `npm run lint` / `npm run typecheck`（`frontend/`） | fetch をモックし、生成〜表示〜ダウンロードリンク、送信前の入力検証とフォーカス移動、サーバーエラーの案内表示、生成中の重複送信防止、モデル読み込み中/失敗時のボタン無効化を検証 |
+| API | `pytest` / `ruff check .` / `mypy`（`backend/`） | 生成処理をフェイクに差し替えるため torch・GPU 不要。入力検証（範囲・型・未知の項目・不正 JSON・カタログ外のモデル/LoRA/サンプラー・系統違いの LoRA・壊れた/巨大な画像・変換強度）、モデルごとの既定値、バッチのシード、PNG/JPEG/WebP 出力、img2img、読み込み中の 503・失敗後の再試行、GPU メモリ不足の判別、内部情報が応答に漏れないこと、待ち行列、カタログ検証、ダウンロード済み判定 |
+| 画面 | `npm test` / `npm run lint` / `npm run typecheck`（`frontend/`） | fetch をモックし、生成〜表示〜ダウンロード、送信前の入力検証とフォーカス移動、エラー案内、重複送信防止、モデル切替時の既定値と LoRA の絞り込み、未ダウンロード警告、バッチのサムネイル選択、JPEG 出力、img2img のアップロードと縦横比調整を検証 |
 
 画面の動作確認は、サーバー起動後にブラウザで以下を確認してください：
 
@@ -262,8 +335,11 @@ make check            # 以下をすべて実行
 
 ## 制約と今後の改善点
 
-- 生成は 1 プロセス 1 件ずつ。スループットを上げるには GPU ごとにプロセスを立ててロードバランサで振り分ける、またはジョブキュー（Redis + ワーカー）化が必要です。
+- 生成は 1 プロセス 1 件ずつ、GPU 上のモデルも 1 つです。利用者ごとに違うモデルを選ぶと入れ替えが頻発して遅くなります。スループットを上げるには GPU・モデルごとにプロセスを立てて振り分ける、またはジョブキュー（Redis + ワーカー）化が必要です。
+- 未ダウンロードのモデルは、そのモデルを最初に選んだリクエストの中でダウンロードされます（画面で警告は出ますが、ダウンロードの進捗率は表示されません）。
 - 生成の途中キャンセルや進捗率（ステップ単位）の表示は未対応です（経過秒数のみ）。`callback_on_step_end` と SSE/WebSocket で実装できます。
+- 画像は JSON 内の base64 で返すため、PNG 4 枚（1024px）では応答が 10MB 程度になります。
+- インペイント（部分修正）や ControlNet には未対応です。
 - CLIP のトークン上限（77 トークン）を超えるプロンプトは切り詰められます。
 - 認証・レート制限（IP 単位）はありません。外部公開する場合はリバースプロキシ等で追加してください。
 - 生成画像はサーバーに保存しません（履歴機能なし）。

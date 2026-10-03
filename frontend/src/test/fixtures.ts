@@ -1,9 +1,9 @@
-import type { AppConfig, Health } from "../api/types";
+import type { AppConfig, GenerateRequest, Health } from "../api/types";
 
 export const CONFIG: AppConfig = {
   limits: {
     min_image_size: 256,
-    max_image_size: 1024,
+    max_image_size: 1536,
     size_multiple: 8,
     min_steps: 1,
     max_steps: 50,
@@ -11,14 +11,63 @@ export const CONFIG: AppConfig = {
     max_guidance_scale: 20,
     max_prompt_length: 1000,
     seed_max: 4294967295,
+    max_batch_size: 4,
+    max_loras: 3,
+    max_init_image_mb: 10,
+    min_strength: 0.1,
+    max_strength: 1,
+    min_lora_scale: 0,
+    max_lora_scale: 2,
+    min_quality: 1,
+    max_quality: 100,
   },
-  defaults: { width: 512, height: 512, num_inference_steps: 25, guidance_scale: 7.5 },
+  default_model: "sd15",
+  models: [
+    {
+      id: "sd15",
+      label: "SD 1.5",
+      description: "軽量",
+      family: "sd15",
+      download_size_gb: 5.2,
+      defaults: { width: 512, height: 512, num_inference_steps: 25, guidance_scale: 7.5, scheduler: "default" },
+    },
+    {
+      id: "sdxl",
+      label: "SDXL",
+      description: "高画質",
+      family: "sdxl",
+      download_size_gb: 6.9,
+      defaults: { width: 1024, height: 1024, num_inference_steps: 30, guidance_scale: 7, scheduler: "euler_a" },
+    },
+  ],
+  schedulers: [
+    { id: "default", label: "モデル既定" },
+    { id: "euler_a", label: "Euler a" },
+    { id: "dpmpp_2m_karras", label: "DPM++ 2M Karras" },
+  ],
+  loras: [
+    {
+      id: "pixel",
+      label: "Pixel Art XL",
+      description: "ドット絵風",
+      family: "sdxl",
+      trigger_words: "pixel art",
+      default_scale: 1,
+    },
+  ],
+  output_formats: [
+    { id: "png", label: "PNG", lossy: false, extension: "png" },
+    { id: "jpeg", label: "JPEG", lossy: true, extension: "jpg" },
+    { id: "webp", label: "WebP", lossy: true, extension: "webp" },
+  ],
+  defaults: { num_images: 1, output_format: "png", quality: 90, strength: 0.6 },
 };
 
-export function health(status: Health["status"] = "ready"): Health {
+export function health(status: Health["status"] = "ready", model = "sd15"): Health {
   return {
     status,
-    model_id: "test/model",
+    model,
+    cached_models: ["sd15"],
     device: "cuda",
     dtype: "float16",
     message: status === "failed" ? "モデルが見つかりません。" : null,
@@ -26,12 +75,26 @@ export function health(status: Health["status"] = "ready"): Health {
   };
 }
 
-const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const MIME: Record<string, string> = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };
 
-export function pngResponse(seed: number, elapsedMs = 2500): Response {
-  return new Response(PNG_SIGNATURE, {
-    status: 200,
-    headers: { "Content-Type": "image/png", "X-Seed": String(seed), "X-Generation-Time-Ms": String(elapsedMs) },
+/** A successful /api/generate response echoing the request, one image per requested count. */
+export function generateResponse(req: GenerateRequest, elapsedMs = 2500): Response {
+  const base = req.seed ?? 1234;
+  return Response.json({
+    images: Array.from({ length: req.num_images }, (_, i) => ({
+      seed: base + i,
+      mime_type: MIME[req.output_format],
+      data: btoa("fake-image-bytes"),
+    })),
+    model: req.model,
+    scheduler: req.scheduler,
+    width: req.width,
+    height: req.height,
+    num_inference_steps: req.num_inference_steps,
+    guidance_scale: req.guidance_scale,
+    output_format: req.output_format,
+    elapsed_ms: elapsedMs,
+    filtered_count: 0,
   });
 }
 

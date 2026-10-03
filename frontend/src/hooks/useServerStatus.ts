@@ -44,12 +44,24 @@ export function useServerStatus(): { status: ServerStatus; refresh: () => void }
   return { status, refresh };
 }
 
-/** Generation is pointless (and the button disabled) while the model is not usable. */
-export function isModelBlocked(status: ServerStatus): boolean {
-  if (status.kind !== "online") return false; // unknown/offline: let the request report the problem
-  return status.health.status !== "ready";
-}
-
 export function isModelLoading(status: ServerStatus): boolean {
   return status.kind === "online" && (status.health.status === "loading" || status.health.status === "not_loaded");
+}
+
+/**
+ * The button is disabled only while a model is loading. A failed model does not block:
+ * the user can retry or pick another model. Unknown/offline: let the request report it.
+ */
+export function isModelBlocked(status: ServerStatus): boolean {
+  return isModelLoading(status);
+}
+
+/** Downloaded model ids, or null while unknown (don't warn about downloads we can't confirm). */
+export function cachedModels(status: ServerStatus): string[] | null {
+  return status.kind === "online" ? status.health.cached_models : null;
+}
+
+/** Catalog id of the model on the GPU, or null if none is ready. */
+export function loadedModel(status: ServerStatus): string | null {
+  return status.kind === "online" && status.health.status === "ready" ? status.health.model : null;
 }

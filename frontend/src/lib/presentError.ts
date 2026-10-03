@@ -23,13 +23,13 @@ export function presentError(err: unknown): ErrorPresentation {
   }
   if (err instanceof ApiError) {
     const fieldErrors: FieldErrors = Object.fromEntries(err.fields.map((f) => [f.field, f.message]));
-    // Out-of-memory has a clear remedy; an inquiry ID would only add noise.
-    const showRequestId = err.requestId !== null && err.status >= 500 && err.code !== "gpu_out_of_memory";
+    // Only unexpected failures need an inquiry ID; busy/loading/out-of-memory have a clear remedy.
+    const showRequestId = err.requestId !== null && err.status === 500;
     return {
       message: showRequestId ? `${err.message}（問い合わせID: ${err.requestId}）` : err.message,
       fieldErrors,
       openAdvanced: err.code === "gpu_out_of_memory" || hasAdvancedFieldError(fieldErrors),
-      recheckHealth: err.code === "model_loading" || err.code === "model_unavailable",
+      recheckHealth: ["model_loading", "model_unavailable", "lora_unavailable"].includes(err.code),
     };
   }
   return {

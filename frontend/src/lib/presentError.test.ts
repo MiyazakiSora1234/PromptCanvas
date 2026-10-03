@@ -18,8 +18,10 @@ describe("presentError", () => {
     expect(p.message).toBe("msg");
   });
 
-  it("appends the request ID to server errors", () => {
+  it("appends the request ID only to unexpected server errors", () => {
     expect(presentError(apiError(500, "generation_failed")).message).toBe("msg（問い合わせID: req123）");
+    expect(presentError(apiError(503, "model_loading")).message).toBe("msg");
+    expect(presentError(apiError(429, "server_busy")).message).toBe("msg");
   });
 
   it("maps field errors and opens advanced settings for non-prompt fields", () => {
