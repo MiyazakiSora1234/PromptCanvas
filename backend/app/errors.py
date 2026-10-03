@@ -91,6 +91,12 @@ class ContentFilteredError(AppError):
     )
 
 
+class GenerationCancelledError(AppError):
+    status_code = 409
+    code = "cancelled"
+    default_message = "生成を中止しました。"
+
+
 class GenerationFailedError(AppError):
     status_code = 500
     code = "generation_failed"

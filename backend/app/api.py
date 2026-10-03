@@ -8,15 +8,18 @@ import time
 from typing import Annotated, Any, cast
 
 import anyio.to_thread
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Path, Request, Response
 
 from .catalog import Catalog
 from .config import Settings
 from .error_handlers import request_id
-from .errors import classify_generation_error
+from .errors import GenerationCancelledError, classify_generation_error
 from .generator import ImageGenerator
+from .jobs import CancelRegistry
 from .limiter import ConcurrencyLimiter
 from .schemas import (
+    JOB_ID_PATTERN,
+    CancelResponse,
     ConfigResponse,
     ErrorResponse,
     GeneratedImageModel,
@@ -48,12 +51,19 @@ def get_limiter(request: Request) -> ConcurrencyLimiter:
     return cast(ConcurrencyLimiter, request.app.state.limiter)
 
 
+def get_jobs(request: Request) -> CancelRegistry:
+    return cast(CancelRegistry, request.app.state.jobs)
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 CatalogDep = Annotated[Catalog, Depends(get_catalog)]
 GeneratorDep = Annotated[ImageGenerator, Depends(get_generator)]
 LimiterDep = Annotated[ConcurrencyLimiter, Depends(get_limiter)]
+JobsDep = Annotated[CancelRegistry, Depends(get_jobs)]
 
-_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {code: {"model": ErrorResponse} for code in (422, 429, 500, 503)}
+_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    code: {"model": ErrorResponse} for code in (409, 422, 429, 500, 503)
+}
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -76,6 +86,12 @@ async def config(settings: SettingsDep, catalog: CatalogDep) -> ConfigResponse:
     return ConfigResponse.build(settings, catalog)
 
 
+@router.post("/jobs/{job_id}/cancel", response_model=CancelResponse)
+async def cancel_job(job_id: Annotated[str, Path(pattern=JOB_ID_PATTERN)], jobs: JobsDep) -> CancelResponse:
+    """Stop a running (or queued) generation. It ends within one denoising step with a ``cancelled`` error."""
+    return CancelResponse(cancelled=jobs.cancel(job_id))
+
+
 @router.post("/generate", response_model=GenerateResponse, responses=_ERROR_RESPONSES)
 async def generate(
     body: GenerateRequest,
@@ -85,21 +101,27 @@ async def generate(
     catalog: CatalogDep,
     generator: GeneratorDep,
     limiter: LimiterDep,
+    jobs: JobsDep,
 ) -> GenerateResponse:
-    # Decoding an uploaded image is CPU work; keep it off the event loop.
-    params = await anyio.to_thread.run_sync(build_params, body, settings, catalog)
-    generator.status.ensure_ready()
+    with jobs.register(body.job_id) as cancel:
+        # Decoding an uploaded image is CPU work; keep it off the event loop.
+        params = await anyio.to_thread.run_sync(build_params, body, settings, catalog)
+        generator.status.ensure_ready()
 
-    async with limiter.slot():
-        started = time.perf_counter()
-        try:
-            result = await anyio.to_thread.run_sync(generator.generate, params)
-        except Exception as exc:
-            app_error = classify_generation_error(exc)
-            if app_error is not exc:
-                logger.exception("Generation failed as %s (request_id=%s)", app_error.code, request_id(request))
-            raise app_error from None
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        async with limiter.slot():
+            if cancel.is_set():  # cancelled while waiting in the queue
+                raise GenerationCancelledError()
+            started = time.perf_counter()
+            try:
+                result = await anyio.to_thread.run_sync(generator.generate, params, cancel)
+            except Exception as exc:
+                app_error = classify_generation_error(exc)
+                if app_error is not exc:
+                    logger.exception("Generation failed as %s (request_id=%s)", app_error.code, request_id(request))
+                elif isinstance(app_error, GenerationCancelledError):
+                    logger.info("Generation cancelled (request_id=%s)", request_id(request))
+                raise app_error from None
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
 
     # Prompts may be private: log only their size.
     logger.info(

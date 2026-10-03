@@ -7,7 +7,17 @@ import { initialFormState } from "./validation";
 const IMAGE: PickedImage = { dataUrl: "data:,", name: "a.png", width: 10, height: 10, bytes: 1 };
 
 describe("captureSettings / applyPreset", () => {
-  it("round-trips the form settings but not prompt, seed or images", () => {
+  it("saves the prompt by default and restores it", () => {
+    const base = initialFormState(CONFIG);
+    const form = { ...base, values: { ...base.values, prompt: "  a portrait, soft light  " } };
+    const settings = captureSettings(form);
+    expect(settings.prompt).toBe("a portrait, soft light");
+
+    const applied = applyPreset({ ...base, values: { ...base.values, prompt: "old" } }, settings, CONFIG);
+    expect(applied.ok && applied.state.values.prompt).toBe("a portrait, soft light");
+  });
+
+  it("round-trips the form settings but not prompt (when excluded), seed or images", () => {
     const base = initialFormState(CONFIG);
     const form = {
       ...base,
@@ -23,7 +33,7 @@ describe("captureSettings / applyPreset", () => {
       },
       loras: [{ id: "pixel", scale: 0.5 }],
     };
-    const settings = captureSettings(form);
+    const settings = captureSettings(form, { includePrompt: false });
     expect(settings).toMatchObject({ model: "sdxl", style: "photo", width: 768, guidance_scale: 4, negative_prompt: "blurry" });
     expect(settings).not.toHaveProperty("prompt");
     expect(settings).not.toHaveProperty("seed");

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import threading
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -11,6 +12,7 @@ from PIL import Image
 
 from app.catalog import Catalog
 from app.config import Settings
+from app.errors import GenerationCancelledError
 from app.generator import GeneratedImage, GenerationResult, ModelState, ModelStatus, batch_seeds
 from app.imaging import OUTPUT_FORMATS, encode_image
 from app.main import create_app
@@ -72,6 +74,8 @@ class FakeGenerator:
         self._status = ModelStatus(state, model="sd15", device="cpu", dtype="float32")
         self.error = error
         self.calls: list[GenerationParams] = []
+        # Runs at the start of generate() (e.g. to cancel the job mid-flight).
+        self.during: Callable[[], object] | None = None
 
     @property
     def status(self) -> ModelStatus:
@@ -88,8 +92,12 @@ class FakeGenerator:
     def load(self) -> None:
         pass
 
-    def generate(self, params: GenerationParams) -> GenerationResult:
+    def generate(self, params: GenerationParams, cancel: threading.Event | None = None) -> GenerationResult:
         self.calls.append(params)
+        if self.during is not None:
+            self.during()
+        if cancel is not None and cancel.is_set():
+            raise GenerationCancelledError()
         if self.error is not None:
             raise self.error
         img = Image.new("RGB", (params.width, params.height), "white")

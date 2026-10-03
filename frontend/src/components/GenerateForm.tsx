@@ -45,7 +45,7 @@ interface GenerateFormProps {
   identityCached: boolean | null;
   presets: PresetStore;
   onApplyPreset: (id: string) => string;
-  onSavePreset: (name: string) => string;
+  onSavePreset: (name: string, includePrompt: boolean) => string;
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
   onSubmit: () => void;

@@ -21,8 +21,13 @@ type GenerateHandler = (body: GenerateRequest) => Response | Promise<Response>;
 
 function mockServer({ status = health(), generate }: { status?: Health; generate?: GenerateHandler } = {}) {
   const generateCalls: GenerateRequest[] = [];
+  const cancelCalls: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.endsWith("/cancel")) {
+      cancelCalls.push(url);
+      return Response.json({ cancelled: true });
+    }
     if (url.endsWith("/api/config")) return Response.json(CONFIG);
     if (url.endsWith("/api/health")) return Response.json(status);
     if (url.endsWith("/api/generate")) {
@@ -33,7 +38,7 @@ function mockServer({ status = health(), generate }: { status?: Health; generate
     return new Response("not found", { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { generateCalls };
+  return { generateCalls, cancelCalls };
 }
 
 async function renderReady() {
@@ -85,8 +90,28 @@ describe("App", () => {
         pose_image: null,
         identity_strength: 0.8,
         pose_strength: 0.9,
+        job_id: expect.stringMatching(/^[0-9a-f]{32}$/),
       },
     ]);
+  });
+
+  it("stops a running generation", async () => {
+    let finish: (res: Response) => void = () => {};
+    const { cancelCalls } = mockServer({ generate: () => new Promise<Response>((resolve) => (finish = resolve)) });
+    const user = await renderReady();
+
+    await user.type(promptBox(), "a cat");
+    await user.click(generateButton());
+    const stop = await screen.findByRole("button", { name: "中止" });
+    await user.click(stop);
+
+    expect(cancelCalls).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "中止しています…" })).toBeDisabled();
+    finish(errorResponse(409, "cancelled", "生成を中止しました。"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("生成を中止しました。");
+    expect(screen.queryByRole("button", { name: "中止" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "画像を生成" })).toBeEnabled();
   });
 
   it("validates input before sending", async () => {
@@ -363,6 +388,7 @@ describe("App", () => {
     mockServer();
     const user = await renderReady();
 
+    await user.type(promptBox(), "a misty harbor");
     await user.selectOptions(screen.getByLabelText("画像形式"), "webp");
     await openTab(user, "詳細");
     const steps = screen.getByLabelText("ステップ数");
@@ -378,7 +404,9 @@ describe("App", () => {
     await renderReady();
     await openTab(user, "プリセット");
     await user.selectOptions(screen.getByLabelText("使うプリセット"), screen.getByRole("option", { name: "速い WebP" }));
+    expect(screen.getByText(/プロンプト: a misty harbor/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "適用" }));
+    expect(promptBox()).toHaveValue("a misty harbor");
     expect(screen.getByLabelText("画像形式")).toHaveValue("webp");
     expect(screen.getByLabelText("ステップ数")).toHaveValue(40);
 

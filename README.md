@@ -322,6 +322,7 @@ http://localhost:5173 を開くと、`frontend/src` の変更が即座に反映�
 | `GET` | `/api/health` | モデル状態（`loading` / `ready` / `failed`）、読み込み中のモデル、ダウンロード済みモデル、デバイス、待ち行列 |
 | `GET` | `/api/config` | 入力値の範囲、選択肢（モデル・サンプラー・LoRA・画像形式）と各モデルの既定値 |
 | `POST` | `/api/generate` | 画像生成。画像は JSON 内に base64 で返す |
+| `POST` | `/api/jobs/{job_id}/cancel` | 生成の中止。`/api/generate` に `job_id`（英数字・`-`・`_` の 8〜64 文字のランダムな値）を付けて送った生成が、次のステップで止まり HTTP 409（`cancelled`）で返る。モデルの読み込み中に中止した場合は、読み込みが終わった時点で止まる |
 
 `POST /api/generate` のリクエスト（`prompt` 以外は省略可。省略時は選んだモデルの既定値）：
 
@@ -336,7 +337,8 @@ http://localhost:5173 を開くと、`frontend/src` の変更が即座に反映�
   "num_images": 2,
   "output_format": "webp", "quality": 90,
   "init_image": "data:image/png;base64,...", "strength": 0.6,
-  "loras": [{ "id": "pixel-art-xl", "scale": 1.0 }]
+  "loras": [{ "id": "pixel-art-xl", "scale": 1.0 }],
+  "job_id": "3f9c2a7e5b1d4c08"
 }
 ```
 

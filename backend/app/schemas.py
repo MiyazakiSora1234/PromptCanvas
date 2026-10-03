@@ -25,6 +25,7 @@ MIN_LORA_SCALE, MAX_LORA_SCALE = 0.0, 2.0
 MIN_QUALITY, MAX_QUALITY, DEFAULT_QUALITY = 1, 100, 90
 MIN_CONTROL_STRENGTH, MAX_CONTROL_STRENGTH = 0.0, 1.5
 DEFAULT_IDENTITY_STRENGTH, DEFAULT_POSE_STRENGTH = 0.8, 0.9
+JOB_ID_PATTERN = r"^[A-Za-z0-9_-]{8,64}$"
 
 
 class LoraRequest(BaseModel):
@@ -67,6 +68,11 @@ class GenerateRequest(BaseModel):
     )
     identity_strength: float = DEFAULT_IDENTITY_STRENGTH
     pose_strength: float = DEFAULT_POSE_STRENGTH
+    job_id: str | None = Field(
+        default=None,
+        pattern=JOB_ID_PATTERN,
+        description="クライアントが決めるランダムな ID。POST /api/jobs/{job_id}/cancel で中止できる",
+    )
 
 
 @dataclass(frozen=True)
@@ -287,6 +293,10 @@ class GenerateResponse(BaseModel):
     output_format: OutputFormat
     elapsed_ms: int
     filtered_count: int = Field(description="セーフティフィルタで除外された枚数")
+
+
+class CancelResponse(BaseModel):
+    cancelled: bool = Field(description="false: 該当する生成がない（すでに終わっている）")
 
 
 class QueueInfo(BaseModel):

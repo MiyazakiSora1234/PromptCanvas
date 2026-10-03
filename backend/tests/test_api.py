@@ -206,6 +206,27 @@ def test_face_photo_limit(make_client: MakeClient) -> None:
     assert make_client().get("/api/config").json()["limits"]["max_face_images"] == 5
 
 
+def test_running_job_can_be_cancelled(make_client: MakeClient) -> None:
+    generator = FakeGenerator()
+    client = make_client(generator)
+    cancelled: list[Any] = []
+    generator.during = lambda: cancelled.append(client.post("/api/jobs/job-0001/cancel").json())
+    res = client.post("/api/generate", json={"prompt": "a", "job_id": "job-0001"})
+    assert cancelled == [{"cancelled": True}]
+    assert res.status_code == 409
+    assert res.json()["error"]["code"] == "cancelled"
+    # Finished jobs are forgotten; unknown ids are not an error.
+    assert client.post("/api/jobs/job-0001/cancel").json() == {"cancelled": False}
+
+
+def test_job_id_format_is_validated(make_client: MakeClient) -> None:
+    client = make_client()
+    res = client.post("/api/generate", json={"prompt": "a", "job_id": "x"})
+    assert res.status_code == 422
+    assert res.json()["error"]["fields"][0]["field"] == "job_id"
+    assert client.post("/api/jobs/bad!id/cancel").status_code == 422
+
+
 def test_reference_is_sdxl_only(make_client: MakeClient) -> None:
     res = make_client().post("/api/generate", json={"prompt": "a", "face_images": [image_data_url()]})
     [field] = res.json()["error"]["fields"]

@@ -12,13 +12,14 @@ interface PresetBarProps {
   /** Apply the preset with this id; returns a message to show. */
   onApply: (id: string) => string;
   /** Save the current settings under this name; returns a message to show. */
-  onSave: (name: string) => string;
+  onSave: (name: string, includePrompt: boolean) => string;
 }
 
 /** Pick / apply / save / delete settings presets. */
 export function PresetBar({ config, presets, disabled, onApply, onSave }: PresetBarProps) {
   const [selectedId, setSelectedId] = useState("");
   const [name, setName] = useState("");
+  const [includePrompt, setIncludePrompt] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const selected = selectedId ? presets.find(selectedId) : undefined;
 
@@ -28,7 +29,7 @@ export function PresetBar({ config, presets, disabled, onApply, onSave }: Preset
       setStatus("保存する名前を入力してください。");
       return;
     }
-    setStatus(onSave(trimmed));
+    setStatus(onSave(trimmed, includePrompt));
     setName("");
   };
 
@@ -125,6 +126,15 @@ export function PresetBar({ config, presets, disabled, onApply, onSave }: Preset
           保存
         </button>
       </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={includePrompt}
+          onChange={(e) => setIncludePrompt(e.target.checked)}
+          className="size-4 accent-indigo-600"
+        />
+        保存にプロンプトも含める
+      </label>
       <p className="text-xs text-slate-500 dark:text-slate-400">{HELP.presets} 保存先はこのブラウザです。</p>
       {status && (
         <p role="status" className="text-xs font-medium text-indigo-700 dark:text-indigo-300">

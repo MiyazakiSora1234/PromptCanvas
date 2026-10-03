@@ -73,6 +73,12 @@ export async function fetchHealth(signal?: AbortSignal): Promise<Health> {
   return (await res.json()) as Health;
 }
 
+/** Ask the server to stop a generation; the pending generateImages call then fails with code "cancelled". */
+export async function cancelJob(jobId: string): Promise<boolean> {
+  const res = await request(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+  return ((await res.json()) as { cancelled: boolean }).cancelled;
+}
+
 export async function generateImages(payload: GenerateRequest, signal?: AbortSignal): Promise<GenerateResponse> {
   const res = await request("/api/generate", {
     method: "POST",

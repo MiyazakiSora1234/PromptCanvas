@@ -24,6 +24,7 @@ from .errors import (
     AppError,
     ConfigurationError,
     ContentFilteredError,
+    GenerationCancelledError,
     GenerationFailedError,
     LoraUnavailableError,
     ModelLoadingError,
@@ -96,7 +97,7 @@ class ImageGenerator(Protocol):
 
     def load(self) -> None: ...
 
-    def generate(self, params: GenerationParams) -> GenerationResult: ...
+    def generate(self, params: GenerationParams, cancel: threading.Event | None = None) -> GenerationResult: ...
 
 
 def resolve_device(requested: str, *, cuda_available: bool, mps_available: bool) -> str:
@@ -380,8 +381,11 @@ class DiffusersGenerator:
 
     # --- Generation ----------------------------------------------------------
 
-    def generate(self, params: GenerationParams) -> GenerationResult:
+    def generate(self, params: GenerationParams, cancel: threading.Event | None = None) -> GenerationResult:
+        """Run one request. Setting `cancel` stops it at the next denoising step (GenerationCancelledError)."""
         with self._run_lock:
+            if cancel is not None and cancel.is_set():  # cancelled while waiting for the previous job
+                raise GenerationCancelledError()
             logger.info(
                 "Generating %d image(s): model=%s %dx%d steps=%d faces=%d pose=%s",
                 params.num_images,
@@ -428,6 +432,15 @@ class DiffusersGenerator:
                 kwargs["height"] = params.height
             kwargs.update(extra)
 
+            def on_step_end(running: Any, step: int, _timestep: Any, tensors: dict[str, Any]) -> dict[str, Any]:
+                if cancel is not None and cancel.is_set():
+                    raise GenerationCancelledError()
+                if params.uses_reference and step >= getattr(running, "num_timesteps", 0) - 1:
+                    # The ControlNets (~5GB) are done; free them before the VAE decode needs its peak memory.
+                    self._park_identity()
+                return tensors
+
+            kwargs["callback_on_step_end"] = on_step_end
             try:
                 with torch.inference_mode():
                     output = pipe(**kwargs)
@@ -436,9 +449,8 @@ class DiffusersGenerator:
                     self._release_gpu_memory()
                 raise
             finally:
-                if params.uses_reference and self._identity is not None:
-                    self._identity.park()
-                    self._release_gpu_memory()
+                if params.uses_reference:
+                    self._park_identity()
 
         images = getattr(output, "images", None)
         if not images:
@@ -454,6 +466,11 @@ class DiffusersGenerator:
         if not kept:
             raise ContentFilteredError()
         return GenerationResult(images=kept, filtered_count=len(images) - len(kept))
+
+    def _park_identity(self) -> None:
+        if self._identity is not None:
+            self._identity.park()
+            self._release_gpu_memory()
 
     def _release_gpu_memory(self) -> None:
         torch = self._torch

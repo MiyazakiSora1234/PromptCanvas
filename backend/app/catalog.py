@@ -122,12 +122,14 @@ class PresetLora(BaseModel):
 class PresetSettings(BaseModel):
     """Generation settings a preset applies. Omitted fields keep the model's defaults.
 
-    Prompt, seed and images are deliberately not part of presets: they change every time.
+    Seed and images are deliberately not part of presets. The prompt is optional: when
+    omitted, applying the preset keeps whatever prompt the user has typed.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, protected_namespaces=())
 
     model: str
+    prompt: str | None = None
     style: str | None = None
     scheduler: str | None = None
     width: int | None = None

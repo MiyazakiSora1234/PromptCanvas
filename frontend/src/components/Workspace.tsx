@@ -59,7 +59,7 @@ export function Workspace({
   const [message, setMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [focusRequest, setFocusRequest] = useState(0);
-  const { busy, startedAt, result, generate } = useImageGeneration();
+  const { busy, startedAt, result, generate, cancel, cancelling } = useImageGeneration();
   const presets = usePresets(config);
 
   /** Show a message and field errors, switching to the tab that holds the first one. */
@@ -195,8 +195,8 @@ export function Workspace({
     return [`「${preset.label}」を適用しました。`, ...notes].join(" ");
   };
 
-  const handleSavePreset = (name: string): string => {
-    const saved = presets.save(name, captureSettings(form));
+  const handleSavePreset = (name: string, includePrompt: boolean): string => {
+    const saved = presets.save(name, captureSettings(form, { includePrompt }));
     if (!saved.ok) return "保存できませんでした（このブラウザでは設定を保存できない状態です）。";
     return saved.overwritten ? `「${name}」を上書き保存しました。` : `「${name}」を保存しました。`;
   };
@@ -226,7 +226,10 @@ export function Workspace({
       await generate(validation.payload);
       if (switching) onRecheckHealth();
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setMessage("生成を中止しました。"); // stopped before the server knew the job
+        return;
+      }
       const presented = presentError(err);
       showErrors(presented.message, presented.fieldErrors, presented.showTab);
       if (presented.recheckHealth || switching) onRecheckHealth();
@@ -240,7 +243,9 @@ export function Workspace({
 
   const switchingModel = loadedModel !== null && form.values.model !== loadedModel;
   const submitLabel = busy
-    ? modelLoading
+    ? cancelling
+      ? "中止しています…"
+      : modelLoading
       ? "モデルを読み込み中…"
       : "生成中…"
     : modelLoading
@@ -287,6 +292,8 @@ export function Workspace({
             disabled={busy || modelBlocked}
             label={submitLabel}
             message={message}
+            onCancel={busy ? () => void cancel() : null}
+            cancelling={cancelling}
           />
         </ResultPanel>
       </div>

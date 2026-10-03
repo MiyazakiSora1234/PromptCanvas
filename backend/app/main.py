@@ -17,6 +17,7 @@ from .catalog import Catalog, load_catalog
 from .config import Settings
 from .error_handlers import register_error_handlers
 from .generator import DiffusersGenerator, ImageGenerator
+from .jobs import CancelRegistry
 from .limiter import ConcurrencyLimiter
 
 logger = logging.getLogger("promptcanvas")
@@ -65,6 +66,7 @@ def create_app(
     app.state.settings = settings
     app.state.catalog = catalog
     app.state.generator = generator or DiffusersGenerator(settings, catalog)
+    app.state.jobs = CancelRegistry()
 
     if settings.cors_origins:
         app.add_middleware(

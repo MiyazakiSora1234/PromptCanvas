@@ -92,6 +92,8 @@ export interface FormatOption extends Option {
 /** Generation settings stored in a preset. Omitted fields mean "the model's default". */
 export interface PresetSettings {
   model: string;
+  /** Omitted / empty: applying the preset keeps the current prompt. */
+  prompt?: string | null;
   style?: string | null;
   scheduler?: string | null;
   width?: number | null;
@@ -163,6 +165,8 @@ export interface GenerateRequest {
   pose_image: string | null;
   identity_strength: number;
   pose_strength: number;
+  /** Random id that lets the client cancel this request (POST /api/jobs/{id}/cancel). */
+  job_id?: string;
 }
 
 export interface GeneratedImageData {

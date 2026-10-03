@@ -1,5 +1,5 @@
 // Settings presets: built-in ones come from the server (/api/config), the user's own are
-// kept in this browser's localStorage. Prompt, seed and images are never part of a preset.
+// kept in this browser's localStorage. The prompt is optional; seed and images are never part of a preset.
 import type { AppConfig, OutputFormat, PresetSettings } from "../api/types";
 import { findModel, modelDefaultValues, supportsReference, type FormState, type FormValues } from "./validation";
 
@@ -20,10 +20,12 @@ function finite(raw: string): number | null {
 }
 
 /** Snapshot the current form as preset settings (unparseable numbers are left out = model default). */
-export function captureSettings(state: FormState): PresetSettings {
+export function captureSettings(state: FormState, { includePrompt = true } = {}): PresetSettings {
   const v = state.values;
+  const prompt = v.prompt.trim();
   return {
     model: v.model,
+    ...(includePrompt && prompt ? { prompt } : {}),
     style: v.style,
     scheduler: v.scheduler,
     width: finite(v.width),
@@ -66,6 +68,7 @@ export function applyPreset(state: FormState, settings: PresetSettings, config: 
   if (settings.output_format && !config.output_formats.some((f) => f.id === settings.output_format)) {
     warnings.push(`画像形式「${settings.output_format}」は使えないため、そのままにしました。`);
   } else set("output_format", settings.output_format);
+  if (settings.prompt) set("prompt", settings.prompt); // a preset without a prompt keeps the current one
   set("width", settings.width);
   set("height", settings.height);
   set("num_inference_steps", settings.num_inference_steps);
@@ -149,5 +152,8 @@ export function describeSettings(settings: PresetSettings, config: AppConfig): s
   if (settings.guidance_scale !== null && settings.guidance_scale !== undefined)
     parts.push(`ガイダンス ${settings.guidance_scale}`);
   if (settings.loras?.length) parts.push(`LoRA ${settings.loras.length}個`);
-  return parts.join("・");
+  const summary = parts.join("・");
+  if (!settings.prompt) return summary;
+  const prompt = settings.prompt.length > 40 ? `${settings.prompt.slice(0, 40)}…` : settings.prompt;
+  return `${summary}／プロンプト: ${prompt}`;
 }
