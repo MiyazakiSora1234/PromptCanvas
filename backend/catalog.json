@@ -17,7 +17,8 @@
       "repo": "stabilityai/stable-diffusion-xl-base-1.0",
       "variant": "fp16",
       "family": "sdxl",
-      "download_size_gb": 6.9,
+      "download_size_gb": 7.2,
+      "vae": { "repo": "madebyollin/sdxl-vae-fp16-fix" },
       "defaults": { "width": 1024, "height": 1024, "num_inference_steps": 30, "guidance_scale": 7.0, "scheduler": "default" }
     },
     {
@@ -27,7 +28,8 @@
       "repo": "SG161222/RealVisXL_V5.0",
       "variant": "fp16",
       "family": "sdxl",
-      "download_size_gb": 6.6,
+      "download_size_gb": 6.9,
+      "vae": { "repo": "madebyollin/sdxl-vae-fp16-fix" },
       "defaults": { "width": 1024, "height": 1024, "num_inference_steps": 30, "guidance_scale": 3.5, "scheduler": "dpmpp_2m_karras", "style": "photo" }
     },
     {
@@ -75,7 +77,7 @@
   ],
   "identity": {
     "families": ["sdxl"],
-    "download_size_gb": 6.6,
+    "download_size_gb": 9.1,
     "ip_adapter_ratio": 0.65,
     "instantid": { "repo": "InstantX/InstantID", "controlnet_subfolder": "ControlNetModel", "adapter_weight_name": "ip-adapter.bin" },
     "face_models": {
@@ -85,6 +87,9 @@
       "recognition": "recognition/model.onnx"
     },
     "pose_controlnet": { "repo": "xinsir/controlnet-openpose-sdxl-1.0" },
+    "sketch_controlnet": { "repo": "xinsir/controlnet-scribble-sdxl-1.0" },
+    "sketch_strength_ratio": 0.7,
+    "sketch_guidance_end": 0.5,
     "pose_detector": { "repo": "lllyasviel/Annotators", "weight_name": "body_pose_model.pth" }
   }
 }

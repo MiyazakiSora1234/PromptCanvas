@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     torch_dtype: DtypeSetting = "auto"
     enable_attention_slicing: bool = False
     enable_cpu_offload: bool = False
+    # Keep the text encoders (SDXL: ~1.6GB) in CPU RAM except while the prompt is being encoded.
+    # Costs well under a second per request; lowers both idle and peak VRAM.
+    offload_text_encoders: bool = True
     # Cap on the GPU memory PyTorch may use (fraction of total). Without it, the Windows driver
     # silently spills into system RAM when VRAM runs out and generation crawls for many minutes;
     # with it, running out raises an out-of-memory error the UI can explain. None = no cap.

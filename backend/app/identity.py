@@ -29,10 +29,6 @@ from .imaging import fit_to
 logger = logging.getLogger(__name__)
 
 _NO_FACE = "顔を検出できませんでした。顔が正面に近く、はっきり写った写真を選んでください。"
-_NO_FACE_IN_POSE = (
-    "この画像から顔の位置を検出できませんでした。顔が写っている画像を選んでください"
-    "（顔の位置はポーズ参考画像の人物に合わせます）。"
-)
 _FACE_CROPPED = "出力サイズに切り抜くと顔が見切れてしまいます。サイズの縦横比を元画像に合わせてください。"
 _NO_POSE = "ポーズを検出できませんでした。人物の全身または上半身が写った画像を選んでください。"
 
@@ -167,6 +163,31 @@ class _IdentityTokens:
         controlnet.forward = forward
 
 
+def extract_lines(image: Image.Image) -> Image.Image:
+    """White-on-black outlines of a drawing (or the dark edges of any image) for the sketch ControlNet."""
+    import cv2
+
+    gray = cv2.cvtColor(np.asarray(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    # Dark strokes relative to their surroundings, so soft shading and paper tone drop out.
+    lines = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 25, 12)
+    # Remove specks (paper grain, JPEG noise).
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(lines, connectivity=8)
+    min_area = max(16, gray.size // 20000)
+    keep = np.zeros(count, dtype=bool)
+    keep[1:] = stats[1:, cv2.CC_STAT_AREA] >= min_area
+    lines = np.where(keep[labels], 255, 0).astype(np.uint8)
+    # Strokes a few pixels wide at any resolution, like the scribbles the ControlNet was trained on.
+    width = max(1, round(max(gray.shape) / 400))
+    lines = cv2.dilate(lines, np.ones((width, width), np.uint8))
+    return Image.fromarray(lines).convert("RGB")
+
+
+# A pose image counts as "a person OpenPose understands" with at least this many body keypoints;
+# otherwise (drawings, mannequins, illustrations) its outlines are used instead.
+MIN_POSE_KEYPOINTS = 6
+
+
 @dataclass
 class ControlSetup:
     """What the ControlNet pipeline call needs for one request."""
@@ -174,7 +195,13 @@ class ControlSetup:
     controlnets: list[Any]
     images: list[Image.Image]
     scales: list[float]
+    # Fraction of the denoising steps each ControlNet guides (1.0 = all of them).
+    guidance_ends: list[float]
     ip_adapter_embeds: Any | None  # tensor (2|1, 1, 1, 512) or None
+    # False when the face photos are used but no face position is known (e.g. a faceless
+    # mannequin as the pose image): identity then comes from the IP-Adapter alone.
+    identity_net: bool = False
+    pose_mode: str | None = None  # "skeleton" | "sketch"
 
 
 class IdentityConditioner:
@@ -189,6 +216,7 @@ class IdentityConditioner:
         self._pose_detector: Any = None
         self._identitynet: Any = None
         self._posenet: Any = None
+        self._sketchnet: Any = None
         self._adapter_state: dict[str, Any] | None = None
         self._tokens = _IdentityTokens()
 
@@ -243,6 +271,22 @@ class IdentityConditioner:
             self._posenet = self._controlnet(p.repo, p.subfolder, p.revision)
         return self._posenet
 
+    def _sketch_net(self) -> Any:
+        if self._sketchnet is None:
+            s = self._cfg.sketch_controlnet
+            assert s is not None
+            self._sketchnet = self._controlnet(s.repo, s.subfolder, s.revision)
+        return self._sketchnet
+
+    def _skeleton(self, layout: Image.Image, width: int, height: int) -> Image.Image | None:
+        """OpenPose skeleton of the person in `layout`, or None if no clear person is found."""
+        detector = self._pose()
+        poses = detector.detect_poses(np.asarray(layout.convert("RGB")))
+        if not any(sum(k is not None for k in p.body.keypoints) >= MIN_POSE_KEYPOINTS for p in poses):
+            return None
+        skeleton: Image.Image = detector(layout, detect_resolution=512, image_resolution=max(width, height))
+        return skeleton.resize((width, height), Image.Resampling.BILINEAR)
+
     def adapter_state(self) -> dict[str, Any]:
         if self._adapter_state is None:
             import torch
@@ -257,11 +301,12 @@ class IdentityConditioner:
         """Drop everything (when switching to a model family InstantID can't use)."""
         self._identitynet = None
         self._posenet = None
+        self._sketchnet = None
         self._pose_detector = None
 
     def park(self) -> None:
         """Move the ControlNets (~2.4GB each) back to CPU RAM so plain generations keep their VRAM."""
-        for net in (self._identitynet, self._posenet):
+        for net in (self._identitynet, self._posenet, self._sketchnet):
             if net is not None:
                 net.to("cpu")
 
@@ -285,12 +330,15 @@ class IdentityConditioner:
         Several face photos are averaged into one identity. With a pose image, the face keypoints
         are taken from it too, so the face lands where the person in the pose image has theirs;
         otherwise from the first face photo's composition.
+
+        The pose is copied as an OpenPose skeleton when a person is detected, else (drawings,
+        mannequins, illustrations) by following the image's outlines with the sketch ControlNet.
         """
         import torch
 
         layout_source = pose_image if pose_image is not None else face_images[0]
         layout = fit_to(layout_source, width, height)
-        setup = ControlSetup([], [], [], None)
+        setup = ControlSetup([], [], [], [], None)
 
         if face_images:
             analyzer = self._face_analyzer()
@@ -314,9 +362,7 @@ class IdentityConditioner:
                     ]
                 )
             placed = analyzer.largest_face(layout)
-            if placed is None:
-                if pose_image is not None:
-                    raise InvalidInputError(fields=[FieldError("pose_image", _NO_FACE_IN_POSE)])
+            if placed is None and pose_image is None:
                 raise InvalidInputError(fields=[FieldError("face_images", _FACE_CROPPED)])
 
             combined = combine_embeddings(embeddings)
@@ -329,16 +375,35 @@ class IdentityConditioner:
 
             embeds = embedding.unsqueeze(0)  # (1, num_ip_images=1, seq=1, 512)
             setup.ip_adapter_embeds = torch.cat([torch.zeros_like(embeds), embeds]) if guidance else embeds
-            setup.controlnets.append(self._identity_net().to(self._device))
-            setup.images.append(draw_kps((width, height), placed.kps))
-            setup.scales.append(identity_strength)
+            if placed is not None:
+                setup.identity_net = True
+                setup.controlnets.append(self._identity_net().to(self._device))
+                setup.images.append(draw_kps((width, height), placed.kps))
+                setup.scales.append(identity_strength)
+                setup.guidance_ends.append(1.0)
+            else:
+                # The pose image shows no face (a drawing, a mannequin, a back view): there is no face
+                # position to pin, so the likeness comes from the IP-Adapter alone.
+                logger.info("No face in the pose image; using the face photos without IdentityNet")
 
         if pose_image is not None:
-            skeleton = self._pose()(layout, detect_resolution=512, image_resolution=max(width, height))
-            if not np.asarray(skeleton).any():
+            skeleton = self._skeleton(layout, width, height)
+            if skeleton is not None:
+                setup.pose_mode = "skeleton"
+                setup.controlnets.append(self._pose_net().to(self._device))
+                setup.images.append(skeleton)
+                setup.scales.append(pose_strength)
+                setup.guidance_ends.append(1.0)
+            elif self._cfg.sketch_controlnet is not None:
+                lines = extract_lines(layout)
+                if not np.asarray(lines).any():
+                    raise InvalidInputError(fields=[FieldError("pose_image", _NO_POSE)])
+                setup.pose_mode = "sketch"
+                setup.controlnets.append(self._sketch_net().to(self._device))
+                setup.images.append(lines)
+                setup.scales.append(pose_strength * self._cfg.sketch_strength_ratio)
+                setup.guidance_ends.append(self._cfg.sketch_guidance_end)
+            else:
                 raise InvalidInputError(fields=[FieldError("pose_image", _NO_POSE)])
-            setup.controlnets.append(self._pose_net().to(self._device))
-            setup.images.append(skeleton.resize((width, height), Image.Resampling.BILINEAR))
-            setup.scales.append(pose_strength)
 
         return setup

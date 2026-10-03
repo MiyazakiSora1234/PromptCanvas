@@ -344,6 +344,28 @@ def test_identity_files_cover_every_asset() -> None:
     assert ("test/faces", "det.onnx", None) in files
     assert ("test/annotators", "body.pth", None) in files
     assert len(files) == 8
+    with_sketch = type(CATALOG.identity).model_validate(
+        {**CATALOG.identity.model_dump(), "sketch_controlnet": {"repo": "test/scribble"}}
+    )
+    assert ("test/scribble", "diffusion_pytorch_model.safetensors", None) in with_sketch.files()
+
+
+def test_extract_lines_keeps_strokes_and_drops_shading_and_specks() -> None:
+    pytest.importorskip("cv2")
+    from PIL import ImageDraw
+
+    from app.identity import extract_lines
+
+    img = Image.new("RGB", (400, 400), (235, 235, 235))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((0, 300, 400, 400), fill=(200, 200, 200))  # soft shading
+    draw.line((50, 50, 350, 250), fill=(40, 40, 40), width=3)  # a stroke
+    draw.point((380, 20), fill=(0, 0, 0))  # a speck
+    lines = np.asarray(extract_lines(img).convert("L"))
+    assert lines[150, 200] == 255  # on the stroke
+    assert lines[20, 380] == 0
+    assert lines[350, 200] == 0  # inside the shaded area
+    assert lines[10, 10] == 0
 
 
 def test_draw_kps_renders_keypoints_at_their_positions() -> None:

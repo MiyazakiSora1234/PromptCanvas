@@ -98,6 +98,11 @@ PromptCanvas/
 - `PROMPTCANVAS_DEVICE=auto`（既定）は CUDA → MPS → CPU の順に選びます。`cuda` を明示したのに使えない場合は CPU に**黙って切り替えず**、モデル読み込み失敗として画面とログに理由を表示します。
 - **RTX 50 シリーズ（Blackwell）は CUDA 12.8 以上の PyTorch（`cu128`）が必要**です。古い CUDA 版では `no kernel image is available` で失敗します。
 - VRAM が少ない場合は `PROMPTCANVAS_ENABLE_ATTENTION_SLICING=true` や `PROMPTCANVAS_ENABLE_CPU_OFFLOAD=true` を設定してください（速度は落ちます）。
+- VRAM の節約（既定で有効）：
+  - SDXL 標準の VAE は float16 だと画像が壊れるため Diffusers が黙って float32 でデコードし、約 3GB 余計に使います。SDXL / RealVisXL には float16 で使える修正版 VAE（`madebyollin/sdxl-vae-fp16-fix`、`catalog.json` の `vae`）を使います（画質は実測でほぼ同一）。
+  - テキストエンコーダ（SDXL で約 1.6GB）はプロンプトを解析する一瞬だけ GPU に載せ、それ以外は CPU に置きます（`PROMPTCANVAS_OFFLOAD_TEXT_ENCODERS`）。
+  - 生成が終わるたびに、生成中だけ使った作業メモリを解放します。
+  - 実測（SDXL、RTX 5060 Ti 16GB）：待機中 7.0→5.5GB、1024×1024 生成時のピーク 10.5→7.4GB、1536×1536 は 13.5→10.6GB。顔・ポーズ参照（ControlNet 2 つ）は約 12.8GB。生成ごとのピークはサーバーログの `VRAM: peak ...` で確認できます。
 - 生成は 1 プロセスにつき同時に 1 件です（Diffusers のパイプラインはスレッドセーフではないため）。それ以上のリクエストは最大 `PROMPTCANVAS_MAX_QUEUE_SIZE` 件まで待機し、超えると 429 を返します。
 
 ## セットアップ
@@ -176,6 +181,7 @@ npm run build      # frontend/dist に出力され、FastAPI が配信する
 | `PROMPTCANVAS_TORCH_DTYPE` | `auto` | `auto`（GPU: float16 / CPU: float32）/ `float16` / `bfloat16` / `float32` |
 | `PROMPTCANVAS_ENABLE_ATTENTION_SLICING` | `false` | VRAM 節約（やや低速） |
 | `PROMPTCANVAS_ENABLE_CPU_OFFLOAD` | `false` | モデルを必要時のみ GPU に載せる（CUDA のみ、低速だが大幅に VRAM 節約） |
+| `PROMPTCANVAS_OFFLOAD_TEXT_ENCODERS` | `true` | テキストエンコーダをプロンプト解析時だけ GPU に載せる（CUDA のみ、1 回 1 秒未満の追加時間で約 1.6GB 節約） |
 | `PROMPTCANVAS_CUDA_MEMORY_FRACTION` | `0.95` | PyTorch が使える GPU メモリの上限（割合）。上限を超えると「GPU メモリ不足」として案内する。上限がないと Windows ではドライバがメインメモリにあふれさせ、生成が数分〜数十分止まったようになる |
 | `PROMPTCANVAS_MAX_FACE_IMAGES` | `5` | 顔の参照に使える写真の枚数 |
 | `PROMPTCANVAS_MIN_IMAGE_SIZE` / `MAX_IMAGE_SIZE` | `256` / `1536` | 幅・高さの範囲（8 の倍数） |
@@ -268,7 +274,7 @@ cd backend; .venv\Scripts\python.exe -m scripts.download_model sdxl pixel-art-xl
 | 入力 | 役割 |
 | --- | --- |
 | 顔の写真 | この人物の顔の特徴（ArcFace の顔特徴量）を IP-Adapter で、顔の位置・向きを IdentityNet（ControlNet）で反映 |
-| ポーズ参考画像 | OpenPose で骨格を検出し、ControlNet で同じ姿勢にする。顔の写真と併用時は、この画像の人物の顔の位置に顔を配置 |
+| ポーズ参考画像 | 写真の人物は OpenPose で骨格を検出し、ControlNet で同じ姿勢にする。**骨格が検出できない線画・イラスト・デッサン人形は、輪郭線を抜き出して Scribble ControlNet でなぞる**（自動で切り替え）。顔の写真と併用時は、この画像の人物の顔の位置に顔を配置 |
 | プロンプト | 服装・場面・画風（例: `photo of a woman in a red evening dress, ballroom`） |
 
 - 顔だけ・ポーズだけ・両方の組み合わせで使えます。img2img とは同時に使えません。
@@ -277,13 +283,16 @@ cd backend; .venv\Scripts\python.exe -m scripts.download_model sdxl pixel-art-xl
 - **顔の再現度**（既定 0.8）を上げるほど元の顔に近づきます。内部では IdentityNet（顔の位置・向き）にこの値を、IP-Adapter（顔の特徴）にはこの値 × `ip_adapter_ratio`（既定 0.65、`catalog.json` で変更可）を使います。IP-Adapter が強すぎると肌がつるつる・色が濃くなるため、弱めにしても顔の似方はほとんど変わらないことを比較して決めました。
 - **リアルな肌の質感にするには**、モデルに RealVisXL を選んでください（スタイル「リアルな写真」、ガイダンス 3.5 が自動で設定されます）。同じ顔・シードで比較した結果、SDXL 標準モデルより肌のきめ・毛穴・そばかすが自然に出て、色も落ち着きます。ガイダンスを上げすぎる（7 以上）と、肌が硬く・ざらついた質感になりがちです。
 - 写真の人物向けです。イラストの顔や横顔・小さく写った顔は検出できない、または似にくいことがあります。全身の構図では顔が小さくなるため、似る度合いが下がります。
-- 追加のダウンロードは約 6.6GB（初回使用時、または `make download-model`）。顔の検出・特徴抽出は CPU で行い（1 枚 0.2 秒程度）、2 つの ControlNet は使用時だけ GPU に載せます（それ以外の生成の VRAM を圧迫しないため）。
+- **線画・イラストのポーズ**：輪郭線は骨格より強く形を写す（服や体型の線までなぞる）ため、強さは「ポーズの強さ × `sketch_strength_ratio`（既定 0.7）」、効かせるのは生成ステップの前半（`sketch_guidance_end`、既定 0.5）だけにしています。前半で姿勢とシルエットが決まり、後半は線画の細部（関節の丸・補助線・フードなど）に引きずられずにプロンプトどおりの見た目になります。0.35 まで下げると姿勢が崩れることを確認して決めました。線画の服や形が写りすぎるときは「ポーズの強さ」を下げてください。
+- ポーズ参考画像に顔が写っていない（デッサン人形・後ろ姿など）場合は、顔の位置の指定（IdentityNet）を使わず、顔の特徴（IP-Adapter）だけで顔の写真の人物に寄せます（そのぶん似る度合いはやや下がります）。
+- 追加のダウンロードは約 9.1GB（初回使用時、または `make download-model`）。顔の検出・特徴抽出は CPU で行い（1 枚 0.2 秒程度）、ControlNet は使用時だけ GPU に載せ、最後のステップが終わった時点で CPU に戻します（画像への変換や、それ以外の生成の VRAM を圧迫しないため）。
 
 | 部品 | リポジトリ | ライセンス |
 | --- | --- | --- |
 | InstantID（IdentityNet + IP-Adapter） | InstantX/InstantID | Apache-2.0 |
 | 顔検出・顔特徴量（antelopev2: SCRFD / glintr100） | immich-app/antelopev2（revision 固定） | **InsightFace のモデルは非商用研究目的のみ** |
 | OpenPose ControlNet | xinsir/controlnet-openpose-sdxl-1.0 | Apache-2.0 |
+| Scribble ControlNet（線画のポーズ） | xinsir/controlnet-scribble-sdxl-1.0 | Apache-2.0 |
 | 骨格検出（OpenPose body） | lllyasviel/Annotators | 各モデルのライセンスに従う |
 
 > **注意:** 実在の人物の写真は、本人の同意を得たものだけを使ってください。生成した画像で他人になりすましたり、名誉・肖像権を侵害したりしないでください。画面にも同じ注意を表示しています。
@@ -403,7 +412,7 @@ make check            # 以下をすべて実行
 - 未ダウンロードのモデルは、そのモデルを最初に選んだリクエストの中でダウンロードされます（画面で警告は出ますが、ダウンロードの進捗率は表示されません）。
 - 生成の途中キャンセルや進捗率（ステップ単位）の表示は未対応です（経過秒数のみ）。`callback_on_step_end` と SSE/WebSocket で実装できます。
 - 画像は JSON 内の base64 で返すため、PNG 4 枚（1024px）では応答が 10MB 程度になります。
-- インペイント（部分修正）には未対応です。ControlNet はポーズ（OpenPose）と InstantID のみです。
+- インペイント（部分修正）には未対応です。ControlNet はポーズ（OpenPose / 線画の Scribble）と InstantID のみです。
 - 顔・ポーズ参照は 1 枚あたり 30〜40 秒程度かかります（SDXL + ControlNet 2 つ、848×1240・30 ステップ、RTX 5060 Ti）。
 - CLIP のトークン上限（77 トークン）を超えるプロンプトは切り詰められます。
 - 認証・レート制限（IP 単位）はありません。外部公開する場合はリバースプロキシ等で追加してください。

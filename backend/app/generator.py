@@ -188,7 +188,11 @@ class DiffusersGenerator:
 
     def load(self) -> None:
         """Load the default model (called once at startup, in a background thread)."""
-        cached = frozenset(m.id for m in self._catalog.models if is_model_cached(m.repo, m.revision))
+        cached = frozenset(
+            m.id
+            for m in self._catalog.models
+            if is_model_cached(m.repo, m.revision) and (m.vae is None or are_files_cached(m.vae.files()))
+        )
         with self._status_lock:
             self._cached = self._cached | cached
         logger.info("Models available offline: %s", ", ".join(sorted(cached)) or "none")
@@ -261,6 +265,15 @@ class DiffusersGenerator:
         if s.hf_token is not None:
             kwargs["token"] = s.hf_token.get_secret_value()
 
+        if entry.vae is not None:
+            from diffusers import AutoencoderKL
+
+            vae_cls: Any = AutoencoderKL
+            vae = entry.vae
+            kwargs["vae"] = vae_cls.from_pretrained(
+                vae.repo, revision=vae.revision, torch_dtype=kwargs["torch_dtype"], token=kwargs.get("token")
+            )
+
         text2img_cls: Any = AutoPipelineForText2Image  # diffusers is only partially typed
         img2img_cls: Any = AutoPipelineForImage2Image
         text2img = text2img_cls.from_pretrained(entry.repo, **kwargs)
@@ -279,7 +292,25 @@ class DiffusersGenerator:
         # from_pipe casts the shared components to float32 unless a dtype is given.
         img2img = img2img_cls.from_pipe(text2img, torch_dtype=kwargs["torch_dtype"])
         img2img.set_progress_bar_config(disable=True)
-        return _LoadedModel(entry, text2img, img2img, original_scheduler=text2img.scheduler)
+        loaded = _LoadedModel(entry, text2img, img2img, original_scheduler=text2img.scheduler)
+        self._move_text_encoders(loaded, on_gpu=False)
+        return loaded
+
+    def _offloads_text_encoders(self) -> bool:
+        s = self._settings
+        return s.offload_text_encoders and self._device == "cuda" and not s.enable_cpu_offload
+
+    def _move_text_encoders(self, loaded: _LoadedModel, *, on_gpu: bool) -> None:
+        """Text encoders are only needed to encode the prompt; park them in CPU RAM otherwise."""
+        if not self._offloads_text_encoders():
+            return
+        device = self._device if on_gpu else "cpu"
+        for name in ("text_encoder", "text_encoder_2"):
+            encoder = getattr(loaded.text2img, name, None)
+            if encoder is not None and encoder.device.type != device:
+                encoder.to(device)
+        if not on_gpu:
+            self._release_gpu_memory()
 
     def _unload(self) -> None:
         if self._loaded is None:
@@ -372,11 +403,19 @@ class DiffusersGenerator:
         dtype = getattr(self._torch, str(self._dtype_name))
         pipe = cls.from_pipe(loaded.text2img, controlnet=MultiControlNetModel(setup.controlnets), torch_dtype=dtype)
         pipe.set_progress_bar_config(disable=True)
-        extra: dict[str, Any] = {"image": setup.images, "controlnet_conditioning_scale": setup.scales}
+        extra: dict[str, Any] = {
+            "image": setup.images,
+            "controlnet_conditioning_scale": setup.scales,
+            "control_guidance_start": [0.0] * len(setup.guidance_ends),
+            "control_guidance_end": setup.guidance_ends,
+        }
         if setup.ip_adapter_embeds is not None:
-            ratio = self._catalog.identity.ip_adapter_ratio if self._catalog.identity else 1.0
+            # Alongside IdentityNet the adapter is toned down (more natural skin); alone it carries the likeness.
+            identity = self._catalog.identity
+            ratio = identity.ip_adapter_ratio if identity and setup.identity_net else 1.0
             loaded.text2img.set_ip_adapter_scale(params.identity_strength * ratio)
             extra["ip_adapter_image_embeds"] = [setup.ip_adapter_embeds]
+        logger.info("Reference: identity_net=%s pose=%s", setup.identity_net, setup.pose_mode)
         return pipe, extra
 
     # --- Generation ----------------------------------------------------------
@@ -433,6 +472,8 @@ class DiffusersGenerator:
             kwargs.update(extra)
 
             def on_step_end(running: Any, step: int, _timestep: Any, tensors: dict[str, Any]) -> dict[str, Any]:
+                if step == 0:  # the prompt is encoded by now
+                    self._move_text_encoders(loaded, on_gpu=False)
                 if cancel is not None and cancel.is_set():
                     raise GenerationCancelledError()
                 if params.uses_reference and step >= getattr(running, "num_timesteps", 0) - 1:
@@ -441,7 +482,11 @@ class DiffusersGenerator:
                 return tensors
 
             kwargs["callback_on_step_end"] = on_step_end
+            cuda = self._device == "cuda"
+            if cuda:
+                torch.cuda.reset_peak_memory_stats()
             try:
+                self._move_text_encoders(loaded, on_gpu=True)
                 with torch.inference_mode():
                     output = pipe(**kwargs)
             except Exception as exc:
@@ -449,8 +494,18 @@ class DiffusersGenerator:
                     self._release_gpu_memory()
                 raise
             finally:
+                self._move_text_encoders(loaded, on_gpu=False)
                 if params.uses_reference:
                     self._park_identity()
+                if cuda:
+                    peak_gb = torch.cuda.max_memory_allocated() / 1024**3
+                    # Hand the per-request working memory back so other apps (and Task Manager) see it free.
+                    self._release_gpu_memory()
+                    logger.info(
+                        "VRAM: peak %.1f GB during generation, %.1f GB held after",
+                        peak_gb,
+                        torch.cuda.memory_reserved() / 1024**3,
+                    )
 
         images = getattr(output, "images", None)
         if not images:

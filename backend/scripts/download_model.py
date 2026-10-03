@@ -44,6 +44,9 @@ def main() -> None:
         if model.variant:
             kwargs["variant"] = model.variant
         print(f"  -> {pipeline_cls.download(model.repo, **kwargs)}")
+        if model.vae is not None:
+            for repo, filename, revision in model.vae.files():
+                print(f"  -> {hf_hub_download(repo, filename, revision=revision, token=token)}", flush=True)
 
     for lora in catalog.loras:
         if wanted and lora.id not in wanted:

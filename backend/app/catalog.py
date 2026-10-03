@@ -43,10 +43,30 @@ class ModelDefaults(BaseModel):
     style: str = "none"
 
 
+class _Asset(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repo: str
+    revision: str | None = None
+
+
+class VaeAsset(_Asset):
+    """A replacement VAE in diffusers layout (config.json + diffusion_pytorch_model.safetensors)."""
+
+    def files(self) -> list[tuple[str, str, str | None]]:
+        return [
+            (self.repo, "config.json", self.revision),
+            (self.repo, "diffusion_pytorch_model.safetensors", self.revision),
+        ]
+
+
 class ModelEntry(_Entry):
     variant: str | None = None
     # Shown to users before a first-time download; informational only.
     download_size_gb: float | None = Field(default=None, gt=0)
+    # Use this VAE instead of the model's own. The stock SDXL VAE overflows in float16, so
+    # Diffusers silently decodes it in float32 (~3GB extra VRAM); a fp16-fixed VAE avoids that.
+    vae: VaeAsset | None = None
     defaults: ModelDefaults
 
 
@@ -54,13 +74,6 @@ class LoraEntry(_Entry):
     weight_name: str | None = None
     trigger_words: str = ""
     default_scale: float = Field(default=1.0, ge=0, le=2)
-
-
-class _Asset(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    repo: str
-    revision: str | None = None
 
 
 class InstantIdAsset(_Asset):
@@ -95,21 +108,33 @@ class IdentityConfig(BaseModel):
     face_models: FaceModelsAsset
     pose_controlnet: ControlNetAsset
     pose_detector: PoseDetectorAsset
+    # Follows the outlines of a pose image in which no skeleton is found (line art, illustrations,
+    # mannequins). None = such images are rejected.
+    sketch_controlnet: ControlNetAsset | None = None
+    # Outline guidance is stricter than a skeleton (it also copies body shape), so it gets
+    # pose_strength x this.
+    sketch_strength_ratio: float = Field(default=0.7, gt=0, le=1.5)
+    # Outlines guide only the first part of denoising: enough to fix pose and silhouette, while the
+    # drawing's own details (hoods, construction lines, joint circles) don't end up in the image.
+    sketch_guidance_end: float = Field(default=0.5, gt=0, le=1.0)
 
     def files(self) -> list[tuple[str, str, str | None]]:
         """(repo, filename, revision) of every file needed, for downloads and cache checks."""
-        i, f, p, d = self.instantid, self.face_models, self.pose_controlnet, self.pose_detector
-        cn = f"{p.subfolder}/" if p.subfolder else ""
-        return [
+        i, f, d = self.instantid, self.face_models, self.pose_detector
+        files = [
             (i.repo, f"{i.controlnet_subfolder}/config.json", i.revision),
             (i.repo, f"{i.controlnet_subfolder}/diffusion_pytorch_model.safetensors", i.revision),
             (i.repo, i.adapter_weight_name, i.revision),
             (f.repo, f.detection, f.revision),
             (f.repo, f.recognition, f.revision),
-            (p.repo, f"{cn}config.json", p.revision),
-            (p.repo, f"{cn}diffusion_pytorch_model.safetensors", p.revision),
             (d.repo, d.weight_name, d.revision),
         ]
+        for net in (self.pose_controlnet, self.sketch_controlnet):
+            if net is not None:
+                prefix = f"{net.subfolder}/" if net.subfolder else ""
+                files.append((net.repo, f"{prefix}config.json", net.revision))
+                files.append((net.repo, f"{prefix}diffusion_pytorch_model.safetensors", net.revision))
+        return files
 
 
 class PresetLora(BaseModel):
