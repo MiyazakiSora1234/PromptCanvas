@@ -65,7 +65,7 @@ export function Tabs<T extends string>({ idPrefix, label, items, active, onChang
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(item.id)}
-            className={`-mb-px flex shrink-0 items-center gap-1 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${
+            className={`-mb-px flex shrink-0 items-center gap-1 whitespace-nowrap border-b-2 px-2 py-2 text-sm font-medium sm:px-3 ${
               selected
                 ? "border-indigo-600 text-indigo-700 dark:border-indigo-400 dark:text-indigo-300"
                 : "border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"

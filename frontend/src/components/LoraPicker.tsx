@@ -1,4 +1,5 @@
 import type { Limits, LoraOption } from "../api/types";
+import { HELP } from "../lib/help";
 import type { LoraSelection } from "../lib/validation";
 
 interface LoraPickerProps {
@@ -26,10 +27,9 @@ export function LoraPicker({ limits, options, modelLabel, selected, error, onCha
   return (
     <fieldset className="flex flex-col gap-2" aria-describedby={error ? "loras-error" : undefined}>
       <legend className="mb-1 text-sm font-semibold">LoRA（画風・概念の追加）</legend>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{HELP.loras}</p>
       {options.length === 0 ? (
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          「{modelLabel}」で使える LoRA はありません。LoRA はベースモデルの系統（SD1.5 / SDXL）が合うものだけ表示されます。
-        </p>
+        <p className="text-xs text-slate-500 dark:text-slate-400">「{modelLabel}」で使える LoRA はありません。</p>
       ) : (
         options.map((lora) => {
           const selection = selected.find((s) => s.id === lora.id);
@@ -71,6 +71,7 @@ export function LoraPicker({ limits, options, modelLabel, selected, error, onCha
                   <span className="w-10 text-right tabular-nums">{selection.scale.toFixed(2)}</span>
                 </div>
               )}
+              {selection && <p className="pl-6 text-xs text-slate-500 dark:text-slate-400">{HELP.loraScale}</p>}
             </div>
           );
         })

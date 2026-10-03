@@ -1,0 +1,25 @@
+// One-line explanations shown under each setting. Kept deliberately short.
+
+export const HELP = {
+  prompt: "作りたい画像の内容。英語がおすすめです。Ctrl+Enter でも生成できます。",
+  model: "絵柄や得意分野を決める元のモデル。",
+  style: "画風の味付け。「リアルな写真」は肌の質感を出す語句を自動で足します。",
+  numImages: "1回で作る枚数。多いほど時間がかかります。",
+  outputFormat: "保存形式。PNG は劣化なし、JPEG / WebP は軽量。",
+  quality: "高いほどきれいで、ファイルが大きくなります。",
+  initImage: "この画像を下絵にして描き直します。",
+  strength: "小さいほど元画像に近く、大きいほど自由に描き直します。",
+  faceImages: "この人の顔のまま生成します。同じ人の写真を複数枚選ぶとより似ます。",
+  identityStrength: "高いほど元の顔に近づきます。肌が不自然なら下げてください。",
+  poseImage: "写っている人物と同じ姿勢にします。",
+  poseStrength: "高いほどポーズに忠実になります。",
+  loras: "画風や題材を足す追加モデル。合うモデルの系統のものだけ表示されます。",
+  loraScale: "効き具合。強すぎると絵が崩れます。",
+  negativePrompt: "出したくない要素（例: blurry, watermark）。",
+  scheduler: "ノイズを取り除く手順。仕上がりと速さが変わります。",
+  size: "出力サイズ（8の倍数）。大きいほど遅く、GPU メモリを使います。",
+  steps: "描き込む回数。多いほど精細ですが遅くなります。",
+  guidance: "プロンプトに従う強さ。高すぎると硬い絵になります。",
+  seed: "同じ値なら同じ画像を再現できます。空欄でランダム。",
+  presets: "今の設定をまとめて保存・呼び出しできます（プロンプトと画像は含みません）。",
+} as const;

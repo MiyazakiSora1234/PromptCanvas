@@ -16,7 +16,7 @@ export function SettingsSummary({ config, state }: { config: AppConfig; state: F
     values.output_format.toUpperCase(),
     state.loras.length > 0 ? `LoRA ${state.loras.length}個` : null,
     state.initImage ? "img2img" : null,
-    state.faceImage ? "顔の参照" : null,
+    state.faceImages.length > 0 ? `顔の参照 ${state.faceImages.length}枚` : null,
     state.poseImage ? "ポーズ参照" : null,
     values.seed.trim() ? `シード ${values.seed.trim()}` : null,
   ].filter((p): p is string => p !== null);

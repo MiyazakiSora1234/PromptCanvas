@@ -1,6 +1,7 @@
 import type { AppConfig, ModelOption } from "../../api/types";
 import type { FieldErrors, FormValues } from "../../lib/validation";
 import type { makeControlProps } from "../formControl";
+import { HELP } from "../../lib/help";
 import { StrengthSlider } from "../StrengthSlider";
 import { buttonClass } from "../styles";
 import { Field } from "../ui";
@@ -31,11 +32,17 @@ export function BasicSettings({
 }: BasicSettingsProps) {
   const { limits } = config;
   const format = config.output_formats.find((f) => f.id === values.output_format);
+  const selectedStyle = config.styles.find((s) => s.id === values.style);
   const batchSizes = Array.from({ length: limits.max_batch_size }, (_, i) => i + 1);
 
   return (
     <>
-      <Field id="model" label="モデル" error={fieldErrors.model} hint={model.description}>
+      <Field
+        id="model"
+        label="モデル"
+        error={fieldErrors.model}
+        hint={model.description ? `${HELP.model} ${model.description}` : HELP.model}
+      >
         <select {...control("model")} onChange={(e) => onModelChange(e.target.value)} disabled={busy}>
           {config.models.map((m) => (
             <option key={m.id} value={m.id}>
@@ -61,11 +68,7 @@ export function BasicSettings({
         id="style"
         label="スタイル"
         error={fieldErrors.style}
-        hint={
-          values.style === "photo"
-            ? "肌のきめ・毛穴などの質感を出す語句と、つるつるした肌・CG っぽさを避ける語句をプロンプトに自動で加えます。"
-            : undefined
-        }
+        hint={selectedStyle ? `${HELP.style} 選択中: ${selectedStyle.description}` : HELP.style}
       >
         <select {...control("style")}>
           {config.styles.map((s) => (
@@ -99,9 +102,10 @@ export function BasicSettings({
               </label>
             ))}
           </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{HELP.numImages}</p>
           {fieldErrors.num_images && <p className="text-xs text-red-700 dark:text-red-300">{fieldErrors.num_images}</p>}
         </fieldset>
-        <Field id="output_format" label="画像形式" error={fieldErrors.output_format}>
+        <Field id="output_format" label="画像形式" error={fieldErrors.output_format} hint={HELP.outputFormat}>
           <select {...control("output_format")}>
             {config.output_formats.map((f) => (
               <option key={f.id} value={f.id}>
@@ -122,7 +126,7 @@ export function BasicSettings({
           step={1}
           decimals={0}
           error={fieldErrors.quality}
-          hint="高いほどきれいで、ファイルが大きくなります。"
+          hint={HELP.quality}
           onChange={(v) => onValueChange("quality", v)}
         />
       )}

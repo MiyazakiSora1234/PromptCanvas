@@ -38,6 +38,7 @@ export interface Limits {
   max_quality: number;
   min_control_strength: number;
   max_control_strength: number;
+  max_face_images: number;
 }
 
 export interface IdentityOption {
@@ -78,6 +79,10 @@ export interface Option {
   label: string;
 }
 
+export interface StyleOption extends Option {
+  description: string;
+}
+
 export interface FormatOption extends Option {
   id: OutputFormat;
   lossy: boolean;
@@ -114,7 +119,7 @@ export interface AppConfig {
   default_model: string;
   models: ModelOption[];
   schedulers: Option[];
-  styles: Option[];
+  styles: StyleOption[];
   loras: LoraOption[];
   output_formats: FormatOption[];
   /** null when the server has face/pose references disabled. */
@@ -153,7 +158,8 @@ export interface GenerateRequest {
   init_image: string | null;
   strength: number;
   loras: LoraRequest[];
-  face_image: string | null;
+  /** Photos of one person; their face features are averaged. */
+  face_images: string[];
   pose_image: string | null;
   identity_strength: number;
   pose_strength: number;

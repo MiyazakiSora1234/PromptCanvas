@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Annotated
 
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
@@ -56,8 +57,10 @@ class GenerateRequest(BaseModel):
     )
     strength: float = DEFAULT_STRENGTH
     loras: list[LoraRequest] = Field(default_factory=list, max_length=10)
-    face_image: str | None = Field(
-        default=None, max_length=_HARD_IMAGE_CAP, description="顔を保つ人物の画像（InstantID、SDXL 系のみ）"
+    face_images: list[Annotated[str, Field(max_length=_HARD_IMAGE_CAP)]] = Field(
+        default_factory=list,
+        max_length=10,
+        description="顔を保つ人物の写真（同じ人物を複数枚可。InstantID、SDXL 系のみ）",
     )
     pose_image: str | None = Field(
         default=None, max_length=_HARD_IMAGE_CAP, description="ポーズ参考画像（OpenPose ControlNet、SDXL 系のみ）"
@@ -84,14 +87,14 @@ class GenerationParams:
     init_image: Image.Image | None
     strength: float
     loras: tuple[tuple[LoraEntry, float], ...]
-    face_image: Image.Image | None = None
+    face_images: tuple[Image.Image, ...] = ()
     pose_image: Image.Image | None = None
     identity_strength: float = DEFAULT_IDENTITY_STRENGTH
     pose_strength: float = DEFAULT_POSE_STRENGTH
 
     @property
     def uses_reference(self) -> bool:
-        return self.face_image is not None or self.pose_image is not None
+        return bool(self.face_images) or self.pose_image is not None
 
 
 def _in_range(value: float, low: float, high: float) -> bool:
@@ -171,11 +174,11 @@ def build_params(req: GenerateRequest, settings: Settings, catalog: Catalog) -> 
             fail("strength", "ステップ数 × 変換強度が 1 以上になるようにしてください。")
         init_image = decode("init_image", req.init_image)
 
-    face_image: Image.Image | None = None
+    face_images: list[Image.Image] = []
     pose_image: Image.Image | None = None
-    if req.face_image or req.pose_image:
+    if req.face_images or req.pose_image:
         identity = catalog.identity
-        field = "face_image" if req.face_image else "pose_image"
+        field = "face_images" if req.face_images else "pose_image"
         if identity is None:
             fail(field, "このサーバーでは顔・ポーズの参照機能が有効になっていません。")
         elif model.family not in identity.families:
@@ -185,8 +188,13 @@ def build_params(req: GenerateRequest, settings: Settings, catalog: Catalog) -> 
         for name, control in (("identity_strength", req.identity_strength), ("pose_strength", req.pose_strength)):
             if not _in_range(control, MIN_CONTROL_STRENGTH, MAX_CONTROL_STRENGTH):
                 fail(name, f"{MIN_CONTROL_STRENGTH:g}〜{MAX_CONTROL_STRENGTH:g}の範囲で指定してください。")
-        if req.face_image:
-            face_image = decode("face_image", req.face_image)
+        if len(req.face_images) > settings.max_face_images:
+            fail("face_images", f"顔の写真は{settings.max_face_images}枚まで選べます。")
+        for i, data in enumerate(req.face_images):
+            try:
+                face_images.append(decode_base64_image(data, max_bytes=max_bytes))
+            except ImageDecodeError as exc:
+                fail("face_images", f"{i + 1}枚目: {exc}")
         if req.pose_image:
             pose_image = decode("pose_image", req.pose_image)
 
@@ -233,7 +241,7 @@ def build_params(req: GenerateRequest, settings: Settings, catalog: Catalog) -> 
         init_image=init_image,
         strength=req.strength,
         loras=tuple(loras),
-        face_image=face_image,
+        face_images=tuple(face_images),
         pose_image=pose_image,
         identity_strength=req.identity_strength,
         pose_strength=req.pose_strength,
@@ -321,6 +329,7 @@ class Limits(BaseModel):
     max_quality: int
     min_control_strength: float
     max_control_strength: float
+    max_face_images: int
 
 
 class IdentityOption(BaseModel):
@@ -360,6 +369,10 @@ class Option(BaseModel):
     label: str
 
 
+class StyleOption(Option):
+    description: str
+
+
 class FormatOption(Option):
     lossy: bool
     extension: str
@@ -379,7 +392,7 @@ class ConfigResponse(BaseModel):
     default_model: str
     models: list[ModelOption]
     schedulers: list[Option]
-    styles: list[Option]
+    styles: list[StyleOption]
     loras: list[LoraOption]
     output_formats: list[FormatOption]
     identity: IdentityOption | None = Field(description="顔・ポーズ参照（null なら無効）")
@@ -410,6 +423,7 @@ class ConfigResponse(BaseModel):
                 max_quality=MAX_QUALITY,
                 min_control_strength=MIN_CONTROL_STRENGTH,
                 max_control_strength=MAX_CONTROL_STRENGTH,
+                max_face_images=s.max_face_images,
             ),
             default_model=catalog.default_model,
             models=[
@@ -424,7 +438,7 @@ class ConfigResponse(BaseModel):
                 for m in catalog.models
             ],
             schedulers=[Option(id=k, label=v.label) for k, v in SCHEDULERS.items()],
-            styles=[Option(id=k, label=v.label) for k, v in STYLES.items()],
+            styles=[StyleOption(id=k, label=v.label, description=v.description) for k, v in STYLES.items()],
             loras=[
                 LoraOption(
                     id=lora.id,

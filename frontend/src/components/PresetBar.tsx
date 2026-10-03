@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AppConfig } from "../api/types";
 import type { PresetStore } from "../hooks/usePresets";
+import { HELP } from "../lib/help";
 import { describeSettings, MAX_PRESET_NAME } from "../lib/presets";
 import { buttonClass, inputClass } from "./styles";
 
@@ -124,9 +125,7 @@ export function PresetBar({ config, presets, disabled, onApply, onSave }: Preset
           保存
         </button>
       </div>
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        モデル・スタイル・サイズ・ステップ数などを保存します（プロンプト・シード・画像は含みません）。保存先はこのブラウザです。
-      </p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{HELP.presets} 保存先はこのブラウザです。</p>
       {status && (
         <p role="status" className="text-xs font-medium text-indigo-700 dark:text-indigo-300">
           {status}

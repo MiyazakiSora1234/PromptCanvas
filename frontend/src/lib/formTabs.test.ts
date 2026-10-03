@@ -16,6 +16,6 @@ describe("form tabs", () => {
   });
 
   it("collects every tab with an error, ignoring unknown fields", () => {
-    expect(tabsWithErrors({ face_image: "x", quality: "y", body: "z" })).toEqual(new Set(["images", "basic"]));
+    expect(tabsWithErrors({ face_images: "x", quality: "y", body: "z" })).toEqual(new Set(["images", "basic"]));
   });
 });

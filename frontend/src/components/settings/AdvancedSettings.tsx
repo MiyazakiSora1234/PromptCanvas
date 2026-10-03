@@ -1,6 +1,7 @@
 import type { Limits, ModelOption, Option } from "../../api/types";
 import type { FieldErrors, FormValues } from "../../lib/validation";
 import type { makeControlProps } from "../formControl";
+import { HELP } from "../../lib/help";
 import { buttonClass, inputClass } from "../styles";
 import { Field } from "../ui";
 
@@ -40,7 +41,7 @@ export function AdvancedSettings({
 
   return (
     <>
-      <Field id="negative_prompt" label="ネガティブプロンプト" error={fieldErrors.negative_prompt}>
+      <Field id="negative_prompt" label="ネガティブプロンプト" error={fieldErrors.negative_prompt} hint={HELP.negativePrompt}>
         <textarea
           {...control("negative_prompt")}
           rows={2}
@@ -54,7 +55,7 @@ export function AdvancedSettings({
         id="scheduler"
         label="サンプラー"
         error={fieldErrors.scheduler}
-        hint="ノイズを取り除く手順です。速度や仕上がりが変わり、モデルとの相性があります。"
+        hint={HELP.scheduler}
       >
         <select {...control("scheduler")}>
           {schedulers.map((s) => (
@@ -110,13 +111,12 @@ export function AdvancedSettings({
           </Field>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          {limits.size_multiple}の倍数で指定してください。このモデルの基本サイズは {model.defaults.width}×
-          {model.defaults.height} です。大きいほど時間と GPU メモリを消費します。
+          {HELP.size}（このモデルの基本: {model.defaults.width}×{model.defaults.height}）
         </p>
       </fieldset>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field id="num_inference_steps" label="ステップ数" error={fieldErrors.num_inference_steps}>
+        <Field id="num_inference_steps" label="ステップ数" error={fieldErrors.num_inference_steps} hint={HELP.steps}>
           <input
             {...control("num_inference_steps")}
             type="number"
@@ -126,7 +126,7 @@ export function AdvancedSettings({
             step={1}
           />
         </Field>
-        <Field id="guidance_scale" label="ガイダンススケール" error={fieldErrors.guidance_scale}>
+        <Field id="guidance_scale" label="ガイダンススケール" error={fieldErrors.guidance_scale} hint={HELP.guidance}>
           <input
             {...control("guidance_scale")}
             type="number"
@@ -142,7 +142,7 @@ export function AdvancedSettings({
         id="seed"
         label="シード値"
         error={fieldErrors.seed}
-        hint="同じシードと設定で同じ画像を再現できます。複数枚のときは 1 枚ごとに +1 されます。"
+        hint={HELP.seed}
       >
         <div className="flex gap-2">
           <input

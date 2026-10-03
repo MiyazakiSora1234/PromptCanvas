@@ -81,7 +81,7 @@ describe("App", () => {
         init_image: null,
         strength: 0.6,
         loras: [],
-        face_image: null,
+        face_images: [],
         pose_image: null,
         identity_strength: 0.8,
         pose_strength: 0.9,
@@ -168,7 +168,7 @@ describe("App", () => {
     expect(screen.getByLabelText("幅")).toHaveValue(1024);
     expect(screen.getByLabelText("サンプラー")).toHaveValue("euler_a");
     expect(screen.getByLabelText("スタイル")).toHaveValue("photo");
-    expect(screen.getByText(/肌のきめ・毛穴などの質感/)).toBeInTheDocument();
+    expect(screen.getByText(/肌の質感を出す語句を自動で足します/)).toBeInTheDocument();
     await openTab(user, "LoRA");
     await user.click(screen.getByRole("checkbox", { name: /Pixel Art XL/ }));
     expect(tab("LoRA")).toHaveTextContent("(1)");
@@ -280,10 +280,19 @@ describe("App", () => {
     await openTab(user, "基本");
     await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
     await openTab(user, "画像参照");
-    await user.upload(screen.getByLabelText("顔の写真ファイル"), new File(["f"], "me.png", { type: "image/png" }));
+    const face = (name: string) => new File(["f"], name, { type: "image/png" });
+    // Several photos of the same person, picked in two goes; the 4th exceeds the limit of 3.
+    await user.upload(screen.getByLabelText("顔の写真ファイル"), [face("a.png"), face("b.png")]);
+    await user.upload(screen.getByLabelText("顔の写真ファイル"), [face("c.png"), face("d.png")]);
     await user.upload(screen.getByLabelText("ポーズ参考画像ファイル"), new File(["p"], "pose.png", { type: "image/png" }));
 
-    expect(await screen.findByAltText("顔の写真のプレビュー")).toBeInTheDocument();
+    expect(await screen.findByAltText("顔の写真 3枚目")).toBeInTheDocument();
+    expect(screen.queryByAltText("顔の写真 4枚目")).not.toBeInTheDocument();
+    expect(screen.getByText(/顔の写真は3枚までです/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上限の3枚に達しました" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "顔の写真 2枚目を外す" }));
+    expect(screen.queryByAltText("顔の写真 3枚目")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "顔の写真を追加（あと1枚）" })).toBeEnabled();
     expect(screen.getByAltText("ポーズ参考画像のプレビュー")).toBeInTheDocument();
     expect(screen.getByLabelText(/顔の再現度/)).toHaveValue("0.8");
     // img2img can't be combined with references.
@@ -298,21 +307,21 @@ describe("App", () => {
 
     expect(generateCalls[0]).toMatchObject({
       model: "sdxl",
-      face_image: "data:image/png;base64,AAAA",
+      face_images: ["data:image/png;base64,AAAA", "data:image/png;base64,AAAA"],
       pose_image: "data:image/png;base64,AAAA",
       identity_strength: 0.8,
       pose_strength: 0.9,
       init_image: null,
     });
-    expect(screen.getByText("顔の参照")).toBeInTheDocument();
-    expect(screen.getByLabelText("現在の設定")).toHaveTextContent("顔の参照・ポーズ参照");
+    expect(screen.getByText("2枚・再現度 0.8")).toBeInTheDocument();
+    expect(screen.getByLabelText("現在の設定")).toHaveTextContent("顔の参照 2枚・ポーズ参照");
 
     // Switching to a model without reference support drops the images.
     await openTab(user, "基本");
     await user.selectOptions(screen.getByLabelText("モデル"), "sd15");
     await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
     await openTab(user, "画像参照");
-    expect(screen.queryByAltText("顔の写真のプレビュー")).not.toBeInTheDocument();
+    expect(screen.queryByAltText("顔の写真 1枚目")).not.toBeInTheDocument();
     expect(tab("画像参照")).not.toHaveTextContent("●");
   });
 

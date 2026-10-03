@@ -15,7 +15,7 @@ export const FIELD_NAMES = [
   // 画像参照
   "init_image",
   "strength",
-  "face_image",
+  "face_images",
   "pose_image",
   "identity_strength",
   "pose_strength",
@@ -34,7 +34,7 @@ export const FIELD_NAMES = [
 export type FieldName = (typeof FIELD_NAMES)[number];
 
 /** Raw input strings, as typed by the user. */
-export type FormValues = Record<Exclude<FieldName, "init_image" | "face_image" | "pose_image" | "loras">, string>;
+export type FormValues = Record<Exclude<FieldName, "init_image" | "face_images" | "pose_image" | "loras">, string>;
 
 export interface LoraSelection {
   id: string;
@@ -45,8 +45,8 @@ export interface FormState {
   values: FormValues;
   loras: LoraSelection[];
   initImage: PickedImage | null;
-  /** Person whose face to keep (InstantID). */
-  faceImage: PickedImage | null;
+  /** Photos of the person whose face to keep (InstantID); averaged on the server. */
+  faceImages: PickedImage[];
   /** Pose to copy (OpenPose ControlNet). */
   poseImage: PickedImage | null;
 }
@@ -101,7 +101,7 @@ export function initialFormState(config: AppConfig): FormState {
     },
     loras: [],
     initImage: null,
-    faceImage: null,
+    faceImages: [],
     poseImage: null,
   };
 }
@@ -184,18 +184,21 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
       errors.strength = "ステップ数 × 変換強度が 1 以上になるようにしてください。";
   }
 
-  const { faceImage, poseImage } = state;
+  const { faceImages, poseImage } = state;
+  const hasFaces = faceImages.length > 0;
   const identityStrength = parseNumber(values.identity_strength);
   const poseStrength = parseNumber(values.pose_strength);
-  if (faceImage || poseImage) {
-    const field = faceImage ? "face_image" : "pose_image";
+  if (hasFaces || poseImage) {
+    const field = hasFaces ? "face_images" : "pose_image";
     if (model && !supportsReference(config, model))
       errors[field] = `顔・ポーズの参照は SDXL 系のモデルでのみ使えます（選択中: ${model.label}）。`;
     if (initImage) errors[field] = "img2img（元画像から生成）と顔・ポーズの参照は同時に使えません。どちらかを外してください。";
+    if (faceImages.length > limits.max_face_images)
+      errors.face_images = `顔の写真は${limits.max_face_images}枚まで選べます。`;
     const range = (value: number) =>
       Number.isFinite(value) && value >= limits.min_control_strength && value <= limits.max_control_strength;
     const message = `${limits.min_control_strength}〜${limits.max_control_strength}の範囲で指定してください。`;
-    if (faceImage && !range(identityStrength)) errors.identity_strength = message;
+    if (hasFaces && !range(identityStrength)) errors.identity_strength = message;
     if (poseImage && !range(poseStrength)) errors.pose_strength = message;
   }
 
@@ -233,7 +236,7 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
       init_image: initImage?.dataUrl ?? null,
       strength: Number.isFinite(strength) ? strength : config.defaults.strength,
       loras: state.loras.map(({ id, scale }) => ({ id, scale })),
-      face_image: faceImage?.dataUrl ?? null,
+      face_images: faceImages.map((img) => img.dataUrl),
       pose_image: poseImage?.dataUrl ?? null,
       identity_strength: Number.isFinite(identityStrength) ? identityStrength : config.defaults.identity_strength,
       pose_strength: Number.isFinite(poseStrength) ? poseStrength : config.defaults.pose_strength,

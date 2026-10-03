@@ -1,4 +1,5 @@
 import type { Limits } from "../api/types";
+import { HELP } from "../lib/help";
 import type { PickedImage } from "../lib/images";
 import { ImagePicker } from "./ImagePicker";
 import { StrengthSlider } from "./StrengthSlider";
@@ -36,6 +37,7 @@ export function InitImagePicker({
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="mb-1 text-sm font-semibold">元画像から生成（img2img・任意）</legend>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{HELP.initImage}</p>
       {unavailableReason && !image ? (
         <p className="text-xs text-slate-500 dark:text-slate-400">{unavailableReason}</p>
       ) : (
@@ -59,12 +61,7 @@ export function InitImagePicker({
           max={limits.max_strength}
           error={strengthError}
           onChange={onStrengthChange}
-          hint={
-            <>
-              小さいほど元画像に近く、大きいほど自由に描き直します（実際のステップ数 ≈{" "}
-              {Number.isFinite(effectiveSteps) ? effectiveSteps : "-"}）。出力サイズは元画像の縦横比に合わせています。
-            </>
-          }
+          hint={`${HELP.strength}（実際のステップ数 ≈ ${Number.isFinite(effectiveSteps) ? effectiveSteps : "-"}）`}
         />
       )}
     </fieldset>

@@ -215,6 +215,11 @@ class DiffusersGenerator:
             logger.warning("GPU が見つからないため CPU で実行します。1枚の生成に数分以上かかる場合があります。")
         elif device == "cuda":
             logger.info("CUDA device: %s", torch.cuda.get_device_name(0))
+            fraction = self._settings.cuda_memory_fraction
+            if fraction is not None:
+                torch.cuda.set_per_process_memory_fraction(fraction)
+                total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                logger.info("GPU memory cap: %.0f%% of %.1f GB", fraction * 100, total_gb)
 
     def _ensure_model(self, entry: ModelEntry) -> _LoadedModel:
         """Return the loaded pipeline for `entry`, switching models if needed. Caller holds _run_lock."""
@@ -343,7 +348,7 @@ class DiffusersGenerator:
         try:
             setup = self._identity_conditioner().prepare(
                 loaded.text2img.unet,
-                face_image=params.face_image,
+                face_images=params.face_images,
                 pose_image=params.pose_image,
                 width=params.width,
                 height=params.height,
@@ -377,9 +382,19 @@ class DiffusersGenerator:
 
     def generate(self, params: GenerationParams) -> GenerationResult:
         with self._run_lock:
+            logger.info(
+                "Generating %d image(s): model=%s %dx%d steps=%d faces=%d pose=%s",
+                params.num_images,
+                params.model.id,
+                params.width,
+                params.height,
+                params.num_inference_steps,
+                len(params.face_images),
+                params.pose_image is not None,
+            )
             loaded = self._ensure_model(params.model)
             self._apply_loras(loaded, params.loras)
-            self._sync_ip_adapter(loaded, needed=params.face_image is not None)
+            self._sync_ip_adapter(loaded, needed=bool(params.face_images))
             torch = self._torch
 
             extra: dict[str, Any] = {}

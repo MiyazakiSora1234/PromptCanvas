@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     torch_dtype: DtypeSetting = "auto"
     enable_attention_slicing: bool = False
     enable_cpu_offload: bool = False
+    # Cap on the GPU memory PyTorch may use (fraction of total). Without it, the Windows driver
+    # silently spills into system RAM when VRAM runs out and generation crawls for many minutes;
+    # with it, running out raises an out-of-memory error the UI can explain. None = no cap.
+    cuda_memory_fraction: float | None = Field(default=0.95, gt=0.1, le=1.0)
 
     # --- Input limits (per-model defaults live in catalog.json) ------------
     min_image_size: int = Field(default=256, ge=64)
@@ -58,8 +62,10 @@ class Settings(BaseSettings):
     # Images per request; each one costs time and VRAM.
     max_batch_size: int = Field(default=4, ge=1, le=16)
     max_loras: int = Field(default=3, ge=0, le=10)
-    # img2img upload limit (decoded bytes).
+    # Upload limit per image (img2img / face / pose; decoded bytes).
     max_init_image_mb: int = Field(default=10, ge=1, le=50)
+    # Face photos of the same person per request (their face features are averaged).
+    max_face_images: int = Field(default=5, ge=1, le=10)
 
     # --- Concurrency -----------------------------------------------------
     # One pipeline instance runs one generation at a time; these bound the queue behind it.

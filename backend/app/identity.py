@@ -48,6 +48,36 @@ class DetectedFace:
     area: float
 
 
+# Cosine similarity of ArcFace embeddings: same person is typically > 0.4 even across angles and
+# lighting, different people < 0.2. Below this, a photo is reported as likely someone else.
+SAME_PERSON_MIN_SIMILARITY = 0.2
+
+
+def _unit(v: np.ndarray) -> np.ndarray:
+    return np.asarray(v / (np.linalg.norm(v) + 1e-8))
+
+
+def combine_embeddings(embeddings: list[np.ndarray]) -> np.ndarray:
+    """Average several photos of one person: mean direction, rescaled to the mean magnitude
+    (InstantID was trained on raw, un-normalized embeddings)."""
+    direction = _unit(np.mean([_unit(e) for e in embeddings], axis=0))
+    magnitude = float(np.mean([np.linalg.norm(e) for e in embeddings]))
+    return (direction * magnitude).astype(np.float32)
+
+
+def find_outliers(embeddings: list[np.ndarray], threshold: float = SAME_PERSON_MIN_SIMILARITY) -> list[int]:
+    """Indexes of photos whose face doesn't match the rest (likely a different person)."""
+    if len(embeddings) < 2:
+        return []
+    units = [_unit(e) for e in embeddings]
+    outliers = []
+    for i, u in enumerate(units):
+        others = _unit(np.mean([v for j, v in enumerate(units) if j != i], axis=0))
+        if float(np.dot(u, others)) < threshold:
+            outliers.append(i)
+    return outliers
+
+
 def draw_kps(size: tuple[int, int], kps: np.ndarray) -> Image.Image:
     """Render facial keypoints the way InstantID's IdentityNet was trained on."""
     import cv2
@@ -83,9 +113,19 @@ class FaceAnalyzer:
         self._rec.prepare(ctx_id=-1)
 
     def largest_face(self, image: Image.Image) -> DetectedFace | None:
+        """The biggest face in the image. Extreme close-ups (face filling the frame, common in
+        selfies) defeat the detector, so if nothing is found it retries with a padded border."""
+        rgb = np.asarray(image.convert("RGB"))
+        found = self._detect(rgb, offset=0)
+        if found is None:
+            pad = max(rgb.shape[:2]) // 4
+            found = self._detect(np.pad(rgb, ((pad, pad), (pad, pad), (0, 0))), offset=pad)
+        return found
+
+    def _detect(self, rgb: np.ndarray, *, offset: int) -> DetectedFace | None:
         from insightface.app.common import Face
 
-        bgr = np.ascontiguousarray(np.asarray(image.convert("RGB"))[:, :, ::-1])
+        bgr = np.ascontiguousarray(rgb[:, :, ::-1])
         bboxes, kpss = self._det.detect(bgr, max_num=0)
         if bboxes is None or len(bboxes) == 0 or kpss is None:
             return None
@@ -93,7 +133,8 @@ class FaceAnalyzer:
         i = int(np.argmax(areas))
         face = Face(bbox=bboxes[i, :4], kps=kpss[i], det_score=bboxes[i, 4])
         self._rec.get(bgr, face)
-        return DetectedFace(np.asarray(face.embedding, dtype=np.float32), np.asarray(kpss[i]), float(areas[i]))
+        # Keypoints back in the original (unpadded) image's coordinates.
+        return DetectedFace(np.asarray(face.embedding, dtype=np.float32), np.asarray(kpss[i]) - offset, float(areas[i]))
 
 
 class _IdentityTokens:
@@ -230,7 +271,7 @@ class IdentityConditioner:
         self,
         unet: Any,
         *,
-        face_image: Image.Image | None,
+        face_images: tuple[Image.Image, ...],
         pose_image: Image.Image | None,
         width: int,
         height: int,
@@ -239,28 +280,47 @@ class IdentityConditioner:
         num_images: int,
         guidance: bool,
     ) -> ControlSetup:
-        """Detect the face / pose and build ControlNet inputs. Raises InvalidInputError for unusable images.
+        """Detect the faces / pose and build ControlNet inputs. Raises InvalidInputError for unusable images.
 
-        With a pose image, the face keypoints are taken from it too, so the face lands where the
-        person in the pose image has theirs; otherwise from the face image's own composition.
+        Several face photos are averaged into one identity. With a pose image, the face keypoints
+        are taken from it too, so the face lands where the person in the pose image has theirs;
+        otherwise from the first face photo's composition.
         """
         import torch
 
-        layout = fit_to(pose_image if pose_image is not None else face_image, width, height)  # type: ignore[arg-type]
+        layout_source = pose_image if pose_image is not None else face_images[0]
+        layout = fit_to(layout_source, width, height)
         setup = ControlSetup([], [], [], None)
 
-        if face_image is not None:
+        if face_images:
             analyzer = self._face_analyzer()
-            reference = analyzer.largest_face(face_image)
-            if reference is None:
-                raise InvalidInputError(fields=[FieldError("face_image", _NO_FACE)])
+            references = [analyzer.largest_face(img) for img in face_images]
+            missing = [i + 1 for i, face in enumerate(references) if face is None]
+            if missing:
+                which = "、".join(f"{n}枚目" for n in missing)
+                message = _NO_FACE if len(face_images) == 1 else f"{which}の写真から{_NO_FACE}"
+                raise InvalidInputError(fields=[FieldError("face_images", message)])
+            embeddings = [face.embedding for face in references if face is not None]
+            outliers = find_outliers(embeddings)
+            if outliers:
+                which = "、".join(f"{i + 1}枚目" for i in outliers)
+                raise InvalidInputError(
+                    fields=[
+                        FieldError(
+                            "face_images",
+                            f"{which}の顔が他の写真と大きく異なります（別人の可能性があります）。"
+                            "同じ人物の写真だけを選んでください。",
+                        )
+                    ]
+                )
             placed = analyzer.largest_face(layout)
             if placed is None:
                 if pose_image is not None:
                     raise InvalidInputError(fields=[FieldError("pose_image", _NO_FACE_IN_POSE)])
-                raise InvalidInputError(fields=[FieldError("face_image", _FACE_CROPPED)])
+                raise InvalidInputError(fields=[FieldError("face_images", _FACE_CROPPED)])
 
-            embedding = torch.from_numpy(reference.embedding).to(self._device, self._dtype).reshape(1, 1, 512)
+            combined = combine_embeddings(embeddings)
+            embedding = torch.from_numpy(combined).to(self._device, self._dtype).reshape(1, 1, 512)
             projection = unet.encoder_hid_proj.image_projection_layers[0]
             with torch.inference_mode():
                 self._tokens.cond = projection(embedding)

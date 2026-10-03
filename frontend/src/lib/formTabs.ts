@@ -21,7 +21,7 @@ const FIELD_TAB: Partial<Record<FieldName, TabId>> = {
   quality: "basic",
   init_image: "images",
   strength: "images",
-  face_image: "images",
+  face_images: "images",
   pose_image: "images",
   identity_strength: "images",
   pose_strength: "images",

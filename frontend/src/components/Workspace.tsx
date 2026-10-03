@@ -18,6 +18,7 @@ import {
   type LoraSelection,
 } from "../lib/validation";
 import { GenerateForm } from "./GenerateForm";
+import { GeneratePanel } from "./GeneratePanel";
 import { ResultPanel } from "./ResultPanel";
 
 interface WorkspaceProps {
@@ -34,6 +35,8 @@ interface WorkspaceProps {
   /** Ask the parent to re-check /api/health (e.g. after a "model loading" error or a model switch). */
   onRecheckHealth: () => void;
 }
+
+const FORM_ID = "generate-form";
 
 function withoutKeys(errors: FieldErrors, keys: string[]): FieldErrors {
   if (!keys.some((k) => k in errors)) return errors;
@@ -74,11 +77,11 @@ export function Workspace({
 
   /**
    * Output size: the aspect ratio of the image that defines the composition (img2img source,
-   * else pose reference, else face photo) at the model's native pixel count; otherwise model defaults.
+   * else pose reference, else first face photo) at the model's native pixel count; otherwise model defaults.
    */
-  const sizeFor = (state: Pick<FormState, "initImage" | "poseImage" | "faceImage">, modelId: string) => {
+  const sizeFor = (state: Pick<FormState, "initImage" | "poseImage" | "faceImages">, modelId: string) => {
     const model = findModel(config, modelId);
-    const layout = state.initImage ?? state.poseImage ?? state.faceImage;
+    const layout = state.initImage ?? state.poseImage ?? state.faceImages[0];
     const size = layout
       ? sizeForAspect(layout.width, layout.height, model.defaults, config.limits)
       : { width: model.defaults.width, height: model.defaults.height };
@@ -90,7 +93,7 @@ export function Workspace({
     setForm((prev) => {
       // Face/pose references only work with some model families (InstantID is SDXL-only).
       const keepRefs = supportsReference(config, model);
-      const next = { ...prev, faceImage: keepRefs ? prev.faceImage : null, poseImage: keepRefs ? prev.poseImage : null };
+      const next = { ...prev, faceImages: keepRefs ? prev.faceImages : [], poseImage: keepRefs ? prev.poseImage : null };
       return {
         ...next,
         // Each model has its own native size, step count, guidance and recommended sampler.
@@ -109,14 +112,14 @@ export function Workspace({
         "num_inference_steps",
         "guidance_scale",
         "loras",
-        "face_image",
+        "face_images",
         "pose_image",
       ]),
     );
   };
 
   /** Read a picked file into one of the image slots and resize the output to fit it. */
-  const pickImage = async (slot: "initImage" | "faceImage" | "poseImage", field: string, file: File) => {
+  const pickImage = async (slot: "initImage" | "poseImage", field: string, file: File) => {
     try {
       const image = await readImageFile(file, config.limits.max_init_image_mb);
       setForm((prev) => {
@@ -130,12 +133,48 @@ export function Workspace({
     }
   };
 
-  const clearImage = (slot: "initImage" | "faceImage" | "poseImage", fields: string[]) => {
+  const clearImage = (slot: "initImage" | "poseImage", fields: string[]) => {
     setForm((prev) => {
       const next = { ...prev, [slot]: null };
       return { ...next, values: { ...prev.values, ...sizeFor(next, prev.values.model) } };
     });
     setFieldErrors((prev) => withoutKeys(prev, fields));
+  };
+
+  /** Add face photos (of the same person), up to the server's limit. */
+  const addFaces = async (files: File[]) => {
+    const max = config.limits.max_face_images;
+    const room = max - form.faceImages.length;
+    const accepted = files.slice(0, Math.max(0, room));
+    const results = await Promise.allSettled(
+      accepted.map((file) => readImageFile(file, config.limits.max_init_image_mb)),
+    );
+    const images = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    const problems = results.flatMap((r, i) =>
+      r.status === "rejected"
+        ? [`${accepted[i]!.name}: ${r.reason instanceof ImageFileError ? r.reason.message : "読み込めませんでした。"}`]
+        : [],
+    );
+    if (files.length > accepted.length) problems.push(`顔の写真は${max}枚までです。超えた分は追加していません。`);
+
+    if (images.length > 0) {
+      setForm((prev) => {
+        const next = { ...prev, faceImages: [...prev.faceImages, ...images].slice(0, max) };
+        return { ...next, values: { ...prev.values, ...sizeFor(next, prev.values.model) } };
+      });
+    }
+    setFieldErrors((prev) => {
+      const cleared = withoutKeys(prev, ["face_images", "width", "height"]);
+      return problems.length > 0 ? { ...cleared, face_images: problems.join(" ") } : cleared;
+    });
+  };
+
+  const removeFace = (index: number) => {
+    setForm((prev) => {
+      const next = { ...prev, faceImages: prev.faceImages.filter((_, i) => i !== index) };
+      return { ...next, values: { ...prev.values, ...sizeFor(next, prev.values.model) } };
+    });
+    setFieldErrors((prev) => withoutKeys(prev, ["face_images", "identity_strength"]));
   };
 
   const handleApplyPreset = (id: string): string => {
@@ -146,7 +185,7 @@ export function Workspace({
     let next = applied.state;
     const notes = [...applied.warnings];
     // With a reference / img2img image, the output keeps that image's aspect ratio.
-    if (next.initImage ?? next.poseImage ?? next.faceImage) {
+    if (next.initImage ?? next.poseImage ?? next.faceImages[0]) {
       next = { ...next, values: { ...next.values, ...sizeFor(next, next.values.model) } };
       notes.push("出力サイズは選択中の画像の縦横比に合わせました。");
     }
@@ -211,8 +250,9 @@ export function Workspace({
         : "画像を生成";
 
   return (
-    <main className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 pb-8 md:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
+    <main className="mx-auto grid max-w-6xl grid-cols-1 items-start gap-4 px-4 pb-8 md:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
       <GenerateForm
+        formId={FORM_ID}
         config={config}
         cachedModels={cachedModels}
         state={form}
@@ -222,12 +262,10 @@ export function Workspace({
         onLorasChange={handleLorasChange}
         onInitImageFile={(file) => void pickImage("initImage", "init_image", file)}
         onInitImageClear={() => clearImage("initImage", ["init_image", "strength"])}
-        onReferenceFile={(kind, file) =>
-          void pickImage(kind === "face" ? "faceImage" : "poseImage", `${kind}_image`, file)
-        }
-        onReferenceClear={(kind) =>
-          clearImage(kind === "face" ? "faceImage" : "poseImage", [`${kind}_image`, `${kind === "face" ? "identity" : "pose"}_strength`])
-        }
+        onFaceFiles={(files) => void addFaces(files)}
+        onRemoveFace={removeFace}
+        onPoseFile={(file) => void pickImage("poseImage", "pose_image", file)}
+        onClearPose={() => clearImage("poseImage", ["pose_image", "pose_strength"])}
         identityCached={identityCached}
         presets={presets}
         onApplyPreset={handleApplyPreset}
@@ -237,11 +275,21 @@ export function Workspace({
         onSubmit={() => void handleSubmit()}
         busy={busy}
         submitDisabled={busy || modelBlocked}
-        submitLabel={submitLabel}
-        message={message}
         focusRequest={focusRequest}
       />
-      <ResultPanel config={config} startedAt={startedAt} result={result} onReuseSeed={handleReuseSeed} />
+      {/* The result with the generate button right under the image; stays in view while settings scroll. */}
+      <div className="min-w-0 md:sticky md:top-4">
+        <ResultPanel config={config} startedAt={startedAt} result={result} onReuseSeed={handleReuseSeed}>
+          <GeneratePanel
+            config={config}
+            state={form}
+            formId={FORM_ID}
+            disabled={busy || modelBlocked}
+            label={submitLabel}
+            message={message}
+          />
+        </ResultPanel>
+      </div>
     </main>
   );
 }

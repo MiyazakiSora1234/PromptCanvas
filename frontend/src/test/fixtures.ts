@@ -22,6 +22,7 @@ export const CONFIG: AppConfig = {
     max_quality: 100,
     min_control_strength: 0,
     max_control_strength: 1.5,
+    max_face_images: 3,
   },
   default_model: "sd15",
   models: [
@@ -62,8 +63,9 @@ export const CONFIG: AppConfig = {
     { id: "dpmpp_2m_karras", label: "DPM++ 2M Karras" },
   ],
   styles: [
-    { id: "none", label: "なし" },
-    { id: "photo", label: "リアルな写真（肌の質感）" },
+    { id: "none", label: "なし", description: "そのまま" },
+    { id: "photo", label: "リアルな写真（肌の質感）", description: "実写の質感" },
+    { id: "anime", label: "アニメ", description: "アニメ調" },
   ],
   loras: [
     {

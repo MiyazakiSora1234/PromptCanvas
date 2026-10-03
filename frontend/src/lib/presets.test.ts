@@ -45,7 +45,7 @@ describe("captureSettings / applyPreset", () => {
 
   it("skips things this server doesn't offer, with warnings", () => {
     const applied = applyPreset(
-      { ...initialFormState(CONFIG), faceImage: IMAGE },
+      { ...initialFormState(CONFIG), faceImages: [IMAGE] },
       { model: "sd15", scheduler: "gone", loras: [{ id: "pixel", scale: 1 }] },
       CONFIG,
     );
@@ -53,7 +53,7 @@ describe("captureSettings / applyPreset", () => {
     if (!applied.ok) return;
     expect(applied.state.values.scheduler).toBe("default");
     expect(applied.state.loras).toEqual([]);
-    expect(applied.state.faceImage).toBeNull();
+    expect(applied.state.faceImages).toEqual([]);
     expect(applied.warnings).toHaveLength(3);
   });
 

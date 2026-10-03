@@ -2,6 +2,7 @@ import { useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
 import type { AppConfig } from "../api/types";
 import type { PresetStore } from "../hooks/usePresets";
 import { TAB_LABELS, TAB_ORDER, tabsWithErrors, type TabId } from "../lib/formTabs";
+import { HELP } from "../lib/help";
 import {
   compatibleLoras,
   findModel,
@@ -19,12 +20,13 @@ import { PresetBar } from "./PresetBar";
 import { ReferencePicker } from "./ReferencePicker";
 import { AdvancedSettings } from "./settings/AdvancedSettings";
 import { BasicSettings } from "./settings/BasicSettings";
-import { SettingsSummary } from "./settings/SettingsSummary";
-import { inputClass, primaryButtonClass } from "./styles";
+import { inputClass } from "./styles";
 import { TabPanel, Tabs, type TabItem } from "./Tabs";
-import { Alert, Field, Panel } from "./ui";
+import { Field, Panel } from "./ui";
 
 interface GenerateFormProps {
+  /** The generate button outside this panel submits the form via this id. */
+  formId: string;
   config: AppConfig;
   /** Downloaded model ids; null while unknown. */
   cachedModels: string[] | null;
@@ -35,8 +37,10 @@ interface GenerateFormProps {
   onLorasChange: (loras: LoraSelection[]) => void;
   onInitImageFile: (file: File) => void;
   onInitImageClear: () => void;
-  onReferenceFile: (kind: "face" | "pose", file: File) => void;
-  onReferenceClear: (kind: "face" | "pose") => void;
+  onFaceFiles: (files: File[]) => void;
+  onRemoveFace: (index: number) => void;
+  onPoseFile: (file: File) => void;
+  onClearPose: () => void;
   /** Face/pose assets downloaded; null while unknown. */
   identityCached: boolean | null;
   presets: PresetStore;
@@ -47,15 +51,18 @@ interface GenerateFormProps {
   onSubmit: () => void;
   busy: boolean;
   submitDisabled: boolean;
-  submitLabel: string;
-  message: string | null;
   /** Incremented by the parent to move focus to the first field with an error. */
   focusRequest: number;
 }
 
 const TABS_ID = "settings";
 
+/**
+ * The settings panel: prompt and tab names stay put, the tab content scrolls inside the
+ * panel when it is taller than the window (on wide screens; narrow screens scroll the page).
+ */
 export function GenerateForm({
+  formId,
   config,
   cachedModels,
   state,
@@ -65,8 +72,10 @@ export function GenerateForm({
   onLorasChange,
   onInitImageFile,
   onInitImageClear,
-  onReferenceFile,
-  onReferenceClear,
+  onFaceFiles,
+  onRemoveFace,
+  onPoseFile,
+  onClearPose,
   identityCached,
   presets,
   onApplyPreset,
@@ -76,8 +85,6 @@ export function GenerateForm({
   onSubmit,
   busy,
   submitDisabled,
-  submitLabel,
-  message,
   focusRequest,
 }: GenerateFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -92,7 +99,10 @@ export function GenerateForm({
     if (focusRequest === 0) return;
     const first = FIELD_NAMES.find((name) => fieldErrors[name]);
     const el = first ? document.getElementById(first === "loras" ? "loras-error" : first) : null;
-    if (el instanceof HTMLElement) el.focus();
+    if (el instanceof HTMLElement) {
+      el.focus();
+      el.scrollIntoView?.({ block: "nearest" });
+    }
     // Only when explicitly requested, not on every error change (that would steal focus while typing).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest]);
@@ -110,7 +120,7 @@ export function GenerateForm({
   };
 
   const errorTabs = tabsWithErrors(fieldErrors);
-  const referenceCount = [state.initImage, state.faceImage, state.poseImage].filter(Boolean).length;
+  const referenceCount = (state.initImage ? 1 : 0) + state.faceImages.length + (state.poseImage ? 1 : 0);
   const tabs: TabItem<TabId>[] = TAB_ORDER.map((id) => ({
     id,
     label: TAB_LABELS[id],
@@ -125,8 +135,15 @@ export function GenerateForm({
   const promptLength = values.prompt.trim().length;
 
   return (
-    <Panel>
-      <form ref={formRef} noValidate onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="flex flex-col gap-4">
+    <Panel className="flex flex-col md:sticky md:top-4 md:max-h-[calc(100vh-6rem)]">
+      <form
+        ref={formRef}
+        id={formId}
+        noValidate
+        onSubmit={handleSubmit}
+        onKeyDown={handleKeyDown}
+        className="flex min-h-0 flex-1 flex-col gap-4"
+      >
         <Field
           id="prompt"
           label={
@@ -145,98 +162,98 @@ export function GenerateForm({
             className={`${inputClass} resize-y`}
           />
           <div className="flex justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span>英語での入力を推奨します。Ctrl+Enter でも生成できます。</span>
+            <span>{HELP.prompt}</span>
             <span className={promptLength > limits.max_prompt_length ? "font-semibold text-red-600" : ""}>
               {promptLength} / {limits.max_prompt_length}
             </span>
           </div>
         </Field>
 
-        <div className="flex flex-col gap-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           <Tabs idPrefix={TABS_ID} label="生成の設定" items={tabs} active={activeTab} onChange={onTabChange} />
 
-          <TabPanel idPrefix={TABS_ID} id="basic" active={activeTab === "basic"}>
-            <BasicSettings
-              config={config}
-              model={model}
-              values={values}
-              fieldErrors={fieldErrors}
-              control={control}
-              needsDownload={needsDownload}
-              busy={busy}
-              onModelChange={onModelChange}
-              onValueChange={onValueChange}
-            />
-          </TabPanel>
+          <div data-testid="settings-scroll" className="min-h-0 flex-1 md:overflow-y-auto md:pr-1">
+            <TabPanel idPrefix={TABS_ID} id="basic" active={activeTab === "basic"}>
+              <BasicSettings
+                config={config}
+                model={model}
+                values={values}
+                fieldErrors={fieldErrors}
+                control={control}
+                needsDownload={needsDownload}
+                busy={busy}
+                onModelChange={onModelChange}
+                onValueChange={onValueChange}
+              />
+            </TabPanel>
 
-          <TabPanel idPrefix={TABS_ID} id="images" active={activeTab === "images"}>
-            <InitImagePicker
-              limits={limits}
-              image={state.initImage}
-              strength={values.strength}
-              steps={values.num_inference_steps}
-              imageError={fieldErrors.init_image}
-              strengthError={fieldErrors.strength}
-              disabled={busy}
-              unavailableReason={
-                state.faceImage || state.poseImage
-                  ? "顔・ポーズの参照と同時には使えません。参照画像を外すと選べます。"
-                  : undefined
-              }
-              onFile={onInitImageFile}
-              onClear={onInitImageClear}
-              onStrengthChange={(v) => onValueChange("strength", v)}
-            />
-            <ReferencePicker
-              config={config}
-              state={state}
-              supported={supportsReference(config, model)}
-              modelLabel={model.label}
-              assetsCached={identityCached}
-              fieldErrors={fieldErrors}
-              disabled={busy}
-              onFaceFile={(file) => onReferenceFile("face", file)}
-              onPoseFile={(file) => onReferenceFile("pose", file)}
-              onClearFace={() => onReferenceClear("face")}
-              onClearPose={() => onReferenceClear("pose")}
-              onValueChange={onValueChange}
-            />
-          </TabPanel>
+            <TabPanel idPrefix={TABS_ID} id="images" active={activeTab === "images"}>
+              <InitImagePicker
+                limits={limits}
+                image={state.initImage}
+                strength={values.strength}
+                steps={values.num_inference_steps}
+                imageError={fieldErrors.init_image}
+                strengthError={fieldErrors.strength}
+                disabled={busy}
+                unavailableReason={
+                  state.faceImages.length > 0 || state.poseImage
+                    ? "顔・ポーズの参照と同時には使えません。参照画像を外すと選べます。"
+                    : undefined
+                }
+                onFile={onInitImageFile}
+                onClear={onInitImageClear}
+                onStrengthChange={(v) => onValueChange("strength", v)}
+              />
+              <ReferencePicker
+                config={config}
+                state={state}
+                supported={supportsReference(config, model)}
+                modelLabel={model.label}
+                assetsCached={identityCached}
+                fieldErrors={fieldErrors}
+                disabled={busy}
+                onFaceFiles={onFaceFiles}
+                onRemoveFace={onRemoveFace}
+                onPoseFile={onPoseFile}
+                onClearPose={onClearPose}
+                onValueChange={onValueChange}
+              />
+            </TabPanel>
 
-          <TabPanel idPrefix={TABS_ID} id="lora" active={activeTab === "lora"}>
-            <LoraPicker
-              limits={limits}
-              options={compatibleLoras(config, model)}
-              modelLabel={model.label}
-              selected={state.loras}
-              error={fieldErrors.loras}
-              onChange={onLorasChange}
-            />
-          </TabPanel>
+            <TabPanel idPrefix={TABS_ID} id="lora" active={activeTab === "lora"}>
+              <LoraPicker
+                limits={limits}
+                options={compatibleLoras(config, model)}
+                modelLabel={model.label}
+                selected={state.loras}
+                error={fieldErrors.loras}
+                onChange={onLorasChange}
+              />
+            </TabPanel>
 
-          <TabPanel idPrefix={TABS_ID} id="advanced" active={activeTab === "advanced"}>
-            <AdvancedSettings
-              limits={limits}
-              schedulers={config.schedulers}
-              model={model}
-              values={values}
-              fieldErrors={fieldErrors}
-              control={control}
-              onValueChange={onValueChange}
-            />
-          </TabPanel>
+            <TabPanel idPrefix={TABS_ID} id="advanced" active={activeTab === "advanced"}>
+              <AdvancedSettings
+                limits={limits}
+                schedulers={config.schedulers}
+                model={model}
+                values={values}
+                fieldErrors={fieldErrors}
+                control={control}
+                onValueChange={onValueChange}
+              />
+            </TabPanel>
 
-          <TabPanel idPrefix={TABS_ID} id="presets" active={activeTab === "presets"}>
-            <PresetBar config={config} presets={presets} disabled={busy} onApply={onApplyPreset} onSave={onSavePreset} />
-          </TabPanel>
-        </div>
-
-        <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
-          <SettingsSummary config={config} state={state} />
-          <button type="submit" disabled={submitDisabled} className={`${primaryButtonClass} w-full py-3 text-base`}>
-            {submitLabel}
-          </button>
-          {message && <Alert>{message}</Alert>}
+            <TabPanel idPrefix={TABS_ID} id="presets" active={activeTab === "presets"}>
+              <PresetBar
+                config={config}
+                presets={presets}
+                disabled={busy}
+                onApply={onApplyPreset}
+                onSave={onSavePreset}
+              />
+            </TabPanel>
+          </div>
         </div>
       </form>
     </Panel>

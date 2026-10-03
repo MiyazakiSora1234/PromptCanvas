@@ -27,6 +27,7 @@ from app.generator import batch_seeds, resolve_device, resolve_dtype
 from app.imaging import ImageDecodeError, decode_base64_image, encode_image, fit_to
 from app.limiter import ConcurrencyLimiter
 from app.schedulers import SCHEDULERS, build_scheduler
+from app.styles import STYLES, apply_style
 
 from .conftest import CATALOG, image_data_url, make_settings
 
@@ -357,6 +358,36 @@ def test_draw_kps_renders_keypoints_at_their_positions() -> None:
     assert pixels[5, 5].tolist() == [0, 0, 0]  # background stays black
 
 
+def _person(seed: int, noise: float = 0.0, base: np.ndarray | None = None) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    v = base if base is not None else rng.normal(size=512)
+    return (v + noise * rng.normal(size=512)).astype(np.float32)
+
+
+def test_combined_embedding_keeps_direction_and_magnitude() -> None:
+    from app.identity import combine_embeddings
+
+    a = _person(1)
+    b = _person(2, noise=0.3, base=a) * 1.2  # same person, different photo and scale
+    combined = combine_embeddings([a, b])
+    assert combined.dtype == np.float32
+    expected_norm = (np.linalg.norm(a) + np.linalg.norm(b)) / 2
+    assert abs(np.linalg.norm(combined) - expected_norm) < 1e-3 * expected_norm
+    cos = float(np.dot(combined, a) / (np.linalg.norm(combined) * np.linalg.norm(a)))
+    assert cos > 0.9
+
+
+def test_find_outliers_flags_a_different_person() -> None:
+    from app.identity import find_outliers
+
+    alice = _person(1)
+    photos = [_person(10 + i, noise=0.4, base=alice) for i in range(3)]
+    assert find_outliers(photos) == []
+    assert find_outliers([photos[0]]) == []  # a single photo has nothing to compare with
+    bob = _person(99)
+    assert find_outliers([*photos[:2], bob]) == [2]
+
+
 def test_identity_tokens_follow_the_guidance_batch_layout() -> None:
     torch = pytest.importorskip("torch")
     from app.identity import _IdentityTokens
@@ -381,6 +412,28 @@ def test_identity_tokens_follow_the_guidance_batch_layout() -> None:
     tokens.patch(net)
     assert net.forward(sample=torch.zeros(4, 4), timestep=1, encoder_hidden_states="text") == "ok"
     assert seen["encoder_hidden_states"].shape == (4, 16, 8)
+
+
+# --- Styles ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("style_id", [s for s in STYLES if s != "none"])
+def test_every_style_adds_positive_and_negative_wording(style_id: str) -> None:
+    prompt, negative = apply_style(style_id, "a cat", "")
+    spec = STYLES[style_id]
+    assert prompt.startswith(spec.prefix) and prompt.endswith(spec.suffix) and "a cat" in prompt
+    assert spec.prefix and spec.suffix and spec.negative and spec.description
+    assert negative.startswith(spec.negative)
+    assert "watermark" in negative  # common defects are always excluded
+
+
+def test_style_none_leaves_prompts_untouched() -> None:
+    assert apply_style("none", "a cat", "dog") == ("a cat", "dog")
+
+
+def test_style_negative_keeps_user_negative_first() -> None:
+    _, negative = apply_style("anime", "a cat", "hat")
+    assert negative.startswith("hat, photo, realistic")
 
 
 def test_hf_token_is_not_exposed_in_repr() -> None:
