@@ -98,6 +98,7 @@ export function Workspace({
     setFieldErrors((prev) =>
       withoutKeys(prev, [
         "model",
+        "style",
         "scheduler",
         "width",
         "height",

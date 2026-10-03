@@ -141,6 +141,26 @@ export function GenerateForm({
         </Field>
 
         <Field
+          id="style"
+          label="スタイル"
+          error={fieldErrors.style}
+          hint={
+            values.style === "photo"
+              ? "肌のきめ・毛穴などの質感を出す語句と、つるつるした肌・CG っぽさを避ける語句をプロンプトに自動で加えます。"
+              : undefined
+          }
+        >
+          <select {...controlProps("style")}>
+            {config.styles.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+                {s.id === model.defaults.style && s.id !== "none" ? "（このモデルの推奨）" : ""}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field
           id="prompt"
           label={
             <>

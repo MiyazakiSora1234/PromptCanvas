@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .config import SIZE_MULTIPLE, Settings
 from .schedulers import SCHEDULERS
+from .styles import STYLES
 
 _ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
 
@@ -39,6 +40,7 @@ class ModelDefaults(BaseModel):
     num_inference_steps: int
     guidance_scale: float
     scheduler: str = "default"
+    style: str = "none"
 
 
 class ModelEntry(_Entry):
@@ -86,6 +88,9 @@ class IdentityConfig(BaseModel):
 
     families: tuple[ModelFamily, ...] = ("sdxl",)
     download_size_gb: float | None = Field(default=None, gt=0)
+    # IP-Adapter scale = identity_strength x this. IdentityNet (face position) takes the full
+    # strength; a weaker IP-Adapter keeps the likeness but avoids plastic, over-saturated skin.
+    ip_adapter_ratio: float = Field(default=0.65, gt=0, le=1.5)
     instantid: InstantIdAsset
     face_models: FaceModelsAsset
     pose_controlnet: ControlNetAsset
@@ -126,6 +131,8 @@ class Catalog(BaseModel):
         for m in self.models:
             if m.defaults.scheduler not in SCHEDULERS:
                 raise ValueError(f"model '{m.id}': unknown scheduler '{m.defaults.scheduler}'")
+            if m.defaults.style not in STYLES:
+                raise ValueError(f"model '{m.id}': unknown style '{m.defaults.style}'")
         return self
 
     def model(self, model_id: str) -> ModelEntry | None:

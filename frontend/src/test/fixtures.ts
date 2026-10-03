@@ -31,7 +31,14 @@ export const CONFIG: AppConfig = {
       description: "軽量",
       family: "sd15",
       download_size_gb: 5.2,
-      defaults: { width: 512, height: 512, num_inference_steps: 25, guidance_scale: 7.5, scheduler: "default" },
+      defaults: {
+        width: 512,
+        height: 512,
+        num_inference_steps: 25,
+        guidance_scale: 7.5,
+        scheduler: "default",
+        style: "none",
+      },
     },
     {
       id: "sdxl",
@@ -39,13 +46,24 @@ export const CONFIG: AppConfig = {
       description: "高画質",
       family: "sdxl",
       download_size_gb: 6.9,
-      defaults: { width: 1024, height: 1024, num_inference_steps: 30, guidance_scale: 7, scheduler: "euler_a" },
+      defaults: {
+        width: 1024,
+        height: 1024,
+        num_inference_steps: 30,
+        guidance_scale: 7,
+        scheduler: "euler_a",
+        style: "photo",
+      },
     },
   ],
   schedulers: [
     { id: "default", label: "モデル既定" },
     { id: "euler_a", label: "Euler a" },
     { id: "dpmpp_2m_karras", label: "DPM++ 2M Karras" },
+  ],
+  styles: [
+    { id: "none", label: "なし" },
+    { id: "photo", label: "リアルな写真（肌の質感）" },
   ],
   loras: [
     {
@@ -92,6 +110,7 @@ export function generateResponse(req: GenerateRequest, elapsedMs = 2500): Respon
     })),
     model: req.model,
     scheduler: req.scheduler,
+    style: req.style,
     width: req.width,
     height: req.height,
     num_inference_steps: req.num_inference_steps,

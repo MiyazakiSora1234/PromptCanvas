@@ -45,6 +45,8 @@ def test_config_exposes_catalog_and_limits(make_client: MakeClient) -> None:
     assert [m["id"] for m in body["models"]] == ["sd15", "sdxl"]
     assert body["models"][1]["defaults"]["scheduler"] == "euler_a"
     assert {"default", "euler_a", "dpmpp_2m_karras"} <= {s["id"] for s in body["schedulers"]}
+    assert [s["id"] for s in body["styles"]] == ["none", "photo"]
+    assert body["models"][1]["defaults"]["style"] == "photo"
     assert [lora["id"] for lora in body["loras"]] == ["pixel", "style15"]
     assert [f["id"] for f in body["output_formats"]] == ["png", "jpeg", "webp"]
     assert body["identity"] == {"families": ["sdxl"], "download_size_gb": 6.6}
@@ -78,8 +80,22 @@ def test_selected_model_supplies_its_own_defaults(make_client: MakeClient) -> No
     body = make_client(gen).post("/api/generate", json={"prompt": "a dog", "model": "sdxl"}).json()
     assert body["model"] == "sdxl"
     assert body["scheduler"] == "euler_a"
+    assert body["style"] == "photo"
     assert (body["width"], body["height"], body["num_inference_steps"]) == (1024, 1024, 30)
     assert gen.calls[0].model.repo == "test/sdxl"
+
+
+def test_photo_style_adds_realism_wording(make_client: MakeClient) -> None:
+    gen = FakeGenerator()
+    client = make_client(gen)
+    client.post("/api/generate", json={"prompt": "a woman", "negative_prompt": "hat", "style": "photo"})
+    params = gen.calls[0]
+    assert params.prompt.startswith("RAW photo, a woman, detailed skin texture")
+    assert params.negative_prompt.startswith("hat, plastic skin, airbrushed")
+
+    client.post("/api/generate", json={"prompt": "a woman", "model": "sdxl", "style": "none"})
+    assert gen.calls[1].prompt == "a woman"
+    assert gen.calls[1].negative_prompt == ""
 
 
 def test_generate_uses_given_parameters(make_client: MakeClient) -> None:
@@ -203,6 +219,7 @@ def test_reference_disabled_without_catalog_entry(make_client: MakeClient) -> No
         ({"prompt": "a", "model": "nope"}, "model"),
         ({"prompt": "a", "model": "test/sd15"}, "model"),
         ({"prompt": "a", "scheduler": "nope"}, "scheduler"),
+        ({"prompt": "a", "style": "anime"}, "style"),
         ({"prompt": "a", "num_images": 0}, "num_images"),
         ({"prompt": "a", "num_images": 5}, "num_images"),
         ({"prompt": "a", "output_format": "gif"}, "output_format"),

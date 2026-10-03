@@ -38,6 +38,7 @@ CATALOG = Catalog.model_validate(
                     "num_inference_steps": 30,
                     "guidance_scale": 7.0,
                     "scheduler": "euler_a",
+                    "style": "photo",
                 },
             },
         ],

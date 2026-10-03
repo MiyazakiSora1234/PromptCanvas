@@ -66,6 +66,7 @@ describe("App", () => {
         negative_prompt: "",
         model: "sd15",
         scheduler: "default",
+        style: "none",
         width: 512,
         height: 512,
         num_inference_steps: 25,
@@ -156,6 +157,8 @@ describe("App", () => {
 
     expect(screen.getByLabelText("幅")).toHaveValue(1024);
     expect(screen.getByLabelText("サンプラー")).toHaveValue("euler_a");
+    expect(screen.getByLabelText("スタイル")).toHaveValue("photo");
+    expect(screen.getByText(/肌のきめ・毛穴などの質感/)).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: /Pixel Art XL/ }));
     expect(screen.getByText(/pixel art/)).toBeInTheDocument();
 
@@ -166,6 +169,7 @@ describe("App", () => {
     expect(generateCalls[0]).toMatchObject({
       model: "sdxl",
       scheduler: "euler_a",
+      style: "photo",
       width: 1024,
       num_inference_steps: 30,
       loras: [{ id: "pixel", scale: 1 }],

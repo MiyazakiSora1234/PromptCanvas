@@ -8,6 +8,7 @@ Hugging Face Diffusers を使った画像生成 Web アプリです。ブラウ�
 | --- | --- |
 | モデル選択 | `catalog.json` に登録したモデル（既定: SD 1.5 / SDXL / Animagine XL）から選択。GPU に載せるのは常に 1 つで、選択に応じて入れ替え |
 | サンプラー | モデル既定 / Euler / Euler a / DPM++ 2M / DPM++ 2M Karras / UniPC / DDIM |
+| スタイル | 「リアルな写真（肌の質感）」を選ぶと、肌のきめ・毛穴を出す語句と、つるつるの肌・CG 感を避ける語句をプロンプトに自動で追加 |
 | バッチ | 1 回で 1〜4 枚（シードは 1 枚ごとに +1）。サムネイルから選んで個別にダウンロード |
 | 画像形式 | PNG / JPEG / WebP（JPEG・WebP は画質を指定可） |
 | img2img | 画像をアップロードし、変換強度を指定して描き直し。出力サイズは元画像の縦横比に自動調整 |
@@ -28,6 +29,7 @@ PromptCanvas/
 │   │   ├── generator.py         # モデルの入れ替え・txt2img/img2img・LoRA・バッチ生成
 │   │   ├── identity.py          # 顔・ポーズの参照（InstantID + OpenPose ControlNet）
 │   │   ├── schedulers.py        # サンプラー一覧
+│   │   ├── styles.py            # スタイル（プロンプトに加える語句）
 │   │   ├── imaging.py           # アップロード画像のデコード、PNG/JPEG/WebP エンコード
 │   │   ├── model_cache.py       # モデルがダウンロード済みかの判定
 │   │   ├── limiter.py           # 同時実行数と待ち行列の制御
@@ -180,7 +182,8 @@ npm run build      # frontend/dist に出力され、FastAPI が配信する
 | モデル（id） | リポジトリ | 系統 | 基本サイズ | 容量 | 備考 |
 | --- | --- | --- | --- | --- | --- |
 | `sd15`（既定） | stable-diffusion-v1-5/stable-diffusion-v1-5 | sd15 | 512×512 | 約5GB | 軽量・高速。VRAM 4GB〜 |
-| `sdxl` | stabilityai/stable-diffusion-xl-base-1.0（fp16） | sdxl | 1024×1024 | 約7GB | 高画質・写真風。VRAM 10GB〜 |
+| `sdxl` | stabilityai/stable-diffusion-xl-base-1.0（fp16） | sdxl | 1024×1024 | 約7GB | 高画質。VRAM 10GB〜 |
+| `realvis-xl` | SG161222/RealVisXL_V5.0（fp16） | sdxl | 1024×1024 | 約6.6GB | 写実・人物の肌の質感に強い。ガイダンス 3.5、DPM++ 2M Karras、スタイル「リアルな写真」が既定。顔・ポーズ参照にもおすすめ |
 | `animagine-xl` | cagliostrolab/animagine-xl-4.0 | sdxl | 832×1216 | 約7GB | アニメ・イラスト調。推奨サンプラー Euler a |
 
 | LoRA（id） | リポジトリ | 系統 | 備考 |
@@ -240,7 +243,8 @@ cd backend; .venv\Scripts\python.exe -m scripts.download_model sdxl pixel-art-xl
 | プロンプト | 服装・場面・画風（例: `photo of a woman in a red evening dress, ballroom`） |
 
 - 顔だけ・ポーズだけ・両方の組み合わせで使えます。img2img とは同時に使えません。
-- **顔の再現度**（既定 0.8）を上げるほど元の顔に近づきます。色が濃すぎる、プロンプトが効きにくいときは下げてください。ネガティブプロンプトに `watermark, text` を入れると透かし状のノイズを防げます。
+- **顔の再現度**（既定 0.8）を上げるほど元の顔に近づきます。内部では IdentityNet（顔の位置・向き）にこの値を、IP-Adapter（顔の特徴）にはこの値 × `ip_adapter_ratio`（既定 0.65、`catalog.json` で変更可）を使います。IP-Adapter が強すぎると肌がつるつる・色が濃くなるため、弱めにしても顔の似方はほとんど変わらないことを比較して決めました。
+- **リアルな肌の質感にするには**、モデルに RealVisXL を選んでください（スタイル「リアルな写真」、ガイダンス 3.5 が自動で設定されます）。同じ顔・シードで比較した結果、SDXL 標準モデルより肌のきめ・毛穴・そばかすが自然に出て、色も落ち着きます。ガイダンスを上げすぎる（7 以上）と、肌が硬く・ざらついた質感になりがちです。
 - 写真の人物向けです。イラストの顔や横顔・小さく写った顔は検出できない、または似にくいことがあります。全身の構図では顔が小さくなるため、似る度合いが下がります。
 - 追加のダウンロードは約 6.6GB（初回使用時、または `make download-model`）。顔の検出・特徴抽出は CPU で行い（1 枚 0.2 秒程度）、2 つの ControlNet は使用時だけ GPU に載せます（それ以外の生成の VRAM を圧迫しないため）。
 

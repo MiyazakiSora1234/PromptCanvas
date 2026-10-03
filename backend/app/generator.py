@@ -368,7 +368,8 @@ class DiffusersGenerator:
         pipe.set_progress_bar_config(disable=True)
         extra: dict[str, Any] = {"image": setup.images, "controlnet_conditioning_scale": setup.scales}
         if setup.ip_adapter_embeds is not None:
-            loaded.text2img.set_ip_adapter_scale(params.identity_strength)
+            ratio = self._catalog.identity.ip_adapter_ratio if self._catalog.identity else 1.0
+            loaded.text2img.set_ip_adapter_scale(params.identity_strength * ratio)
             extra["ip_adapter_image_embeds"] = [setup.ip_adapter_embeds]
         return pipe, extra
 

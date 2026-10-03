@@ -40,6 +40,7 @@ export function ResultPanel({ config, startedAt, result, onReuseSeed }: ResultPa
       ["シード", String(selected.seed)],
       ["モデル", label(config.models, r.model)],
       ["サンプラー", label(config.schedulers, r.scheduler)],
+      ["スタイル", label(config.styles, r.style)],
       ["サイズ", `${r.width}×${r.height}`],
       ["ステップ", String(r.num_inference_steps)],
       ["ガイダンス", String(r.guidance_scale)],

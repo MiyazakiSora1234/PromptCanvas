@@ -13,6 +13,7 @@ from .config import SEED_MAX, SIZE_MULTIPLE, Settings
 from .errors import FieldError, InvalidInputError
 from .imaging import OUTPUT_FORMATS, ImageDecodeError, OutputFormat, decode_base64_image
 from .schedulers import SCHEDULERS
+from .styles import STYLES, apply_style
 
 # Absolute caps so oversized payloads are rejected before any further work.
 _HARD_TEXT_CAP = 10_000
@@ -41,6 +42,7 @@ class GenerateRequest(BaseModel):
     negative_prompt: str = Field(default="", max_length=_HARD_TEXT_CAP)
     model: str | None = Field(default=None, max_length=64, description="catalog.json のモデル ID")
     scheduler: str | None = Field(default=None, max_length=64)
+    style: str | None = Field(default=None, max_length=64, description="none | photo（省略時はモデルの既定）")
     width: int | None = None
     height: int | None = None
     num_inference_steps: int | None = None
@@ -66,10 +68,11 @@ class GenerateRequest(BaseModel):
 
 @dataclass(frozen=True)
 class GenerationParams:
-    prompt: str
+    prompt: str  # with the style's wording applied
     negative_prompt: str
     model: ModelEntry
     scheduler: str
+    style: str
     width: int
     height: int
     num_inference_steps: int
@@ -121,6 +124,10 @@ def build_params(req: GenerateRequest, settings: Settings, catalog: Catalog) -> 
     scheduler = defaults.scheduler if req.scheduler is None else req.scheduler
     if scheduler not in SCHEDULERS:
         fail("scheduler", "選択できないサンプラーです。")
+
+    style = defaults.style if req.style is None else req.style
+    if style not in STYLES:
+        fail("style", "選択できないスタイルです。")
 
     width = defaults.width if req.width is None else req.width
     height = defaults.height if req.height is None else req.height
@@ -208,11 +215,13 @@ def build_params(req: GenerateRequest, settings: Settings, catalog: Catalog) -> 
     if errors:
         raise InvalidInputError(fields=errors)
 
+    styled_prompt, styled_negative = apply_style(style, prompt, negative_prompt)
     return GenerationParams(
-        prompt=prompt,
-        negative_prompt=negative_prompt,
+        prompt=styled_prompt,
+        negative_prompt=styled_negative,
         model=model,
         scheduler=scheduler,
+        style=style,
         width=width,
         height=height,
         num_inference_steps=steps,
@@ -262,6 +271,7 @@ class GenerateResponse(BaseModel):
     images: list[GeneratedImageModel]
     model: str
     scheduler: str
+    style: str
     width: int
     height: int
     num_inference_steps: int
@@ -324,6 +334,7 @@ class ModelDefaultsModel(BaseModel):
     num_inference_steps: int
     guidance_scale: float
     scheduler: str
+    style: str
 
 
 class ModelOption(BaseModel):
@@ -368,6 +379,7 @@ class ConfigResponse(BaseModel):
     default_model: str
     models: list[ModelOption]
     schedulers: list[Option]
+    styles: list[Option]
     loras: list[LoraOption]
     output_formats: list[FormatOption]
     identity: IdentityOption | None = Field(description="顔・ポーズ参照（null なら無効）")
@@ -411,6 +423,7 @@ class ConfigResponse(BaseModel):
                 for m in catalog.models
             ],
             schedulers=[Option(id=k, label=v.label) for k, v in SCHEDULERS.items()],
+            styles=[Option(id=k, label=v.label) for k, v in STYLES.items()],
             loras=[
                 LoraOption(
                     id=lora.id,

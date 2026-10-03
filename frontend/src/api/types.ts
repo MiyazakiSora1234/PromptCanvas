@@ -52,6 +52,7 @@ export interface ModelDefaults {
   num_inference_steps: number;
   guidance_scale: number;
   scheduler: string;
+  style: string;
 }
 
 export interface ModelOption {
@@ -88,6 +89,7 @@ export interface AppConfig {
   default_model: string;
   models: ModelOption[];
   schedulers: Option[];
+  styles: Option[];
   loras: LoraOption[];
   output_formats: FormatOption[];
   /** null when the server has face/pose references disabled. */
@@ -112,6 +114,7 @@ export interface GenerateRequest {
   negative_prompt: string;
   model: string;
   scheduler: string;
+  style: string;
   width: number;
   height: number;
   num_inference_steps: number;
@@ -140,6 +143,7 @@ export interface GenerateResponse {
   images: GeneratedImageData[];
   model: string;
   scheduler: string;
+  style: string;
   width: number;
   height: number;
   num_inference_steps: number;

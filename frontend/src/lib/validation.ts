@@ -6,6 +6,7 @@ import type { PickedImage } from "./images";
 /** Text-like inputs, in on-screen order (used to focus the first invalid one). */
 export const FIELD_NAMES = [
   "model",
+  "style",
   "prompt",
   "init_image",
   "strength",
@@ -83,10 +84,11 @@ export function compatibleLoras(config: AppConfig, model: ModelOption): LoraOpti
 /** The values a model starts with; also applied when the user switches models. */
 export function modelDefaultValues(model: ModelOption): Pick<
   FormValues,
-  "model" | "scheduler" | "width" | "height" | "num_inference_steps" | "guidance_scale"
+  "model" | "style" | "scheduler" | "width" | "height" | "num_inference_steps" | "guidance_scale"
 > {
   return {
     model: model.id,
+    style: model.defaults.style,
     scheduler: model.defaults.scheduler,
     width: String(model.defaults.width),
     height: String(model.defaults.height),
@@ -144,6 +146,7 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
   if (!model) errors.model = "モデルを選んでください。";
 
   if (!config.schedulers.some((s) => s.id === values.scheduler)) errors.scheduler = "サンプラーを選んでください。";
+  if (!config.styles.some((s) => s.id === values.style)) errors.style = "スタイルを選んでください。";
 
   const size = (key: "width" | "height"): number => {
     const n = parseInteger(values[key]);
@@ -230,6 +233,7 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
       negative_prompt: negativePrompt,
       model: values.model,
       scheduler: values.scheduler,
+      style: values.style,
       width,
       height,
       num_inference_steps: steps ?? 0,

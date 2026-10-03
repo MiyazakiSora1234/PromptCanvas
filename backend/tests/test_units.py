@@ -166,6 +166,12 @@ def _catalog_dict(**changes: Any) -> dict[str, Any]:
                 | {"defaults": CATALOG.models[0].defaults.model_dump() | {"scheduler": "nope"}}
             ]
         },
+        {
+            "models": [
+                CATALOG.models[0].model_dump()
+                | {"defaults": CATALOG.models[0].defaults.model_dump() | {"style": "nope"}}
+            ]
+        },
     ],
 )
 def test_catalog_rejects_invalid_entries(changes: dict[str, Any]) -> None:

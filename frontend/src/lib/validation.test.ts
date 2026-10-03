@@ -29,6 +29,7 @@ describe("validateForm", () => {
         negative_prompt: "",
         model: "sd15",
         scheduler: "default",
+        style: "none",
         width: 512,
         height: 512,
         num_inference_steps: 25,

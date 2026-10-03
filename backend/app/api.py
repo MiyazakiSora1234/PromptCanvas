@@ -125,6 +125,7 @@ async def generate(
         ],
         model=params.model.id,
         scheduler=params.scheduler,
+        style=params.style,
         width=params.width,
         height=params.height,
         num_inference_steps=params.num_inference_steps,
