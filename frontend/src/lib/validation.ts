@@ -3,20 +3,25 @@
 import type { AppConfig, GenerateRequest, LoraOption, ModelOption, OutputFormat } from "../api/types";
 import type { PickedImage } from "./images";
 
-/** Text-like inputs, in on-screen order (used to focus the first invalid one). */
+/** Inputs in on-screen order: the prompt, then tab by tab (used to focus the first invalid one). */
 export const FIELD_NAMES = [
+  "prompt",
+  // 基本
   "model",
   "style",
-  "prompt",
+  "num_images",
+  "output_format",
+  "quality",
+  // 画像参照
   "init_image",
   "strength",
   "face_image",
   "pose_image",
   "identity_strength",
   "pose_strength",
-  "num_images",
-  "output_format",
-  "quality",
+  // LoRA
+  "loras",
+  // 詳細
   "negative_prompt",
   "scheduler",
   "width",
@@ -24,7 +29,6 @@ export const FIELD_NAMES = [
   "num_inference_steps",
   "guidance_scale",
   "seed",
-  "loras",
 ] as const;
 
 export type FieldName = (typeof FIELD_NAMES)[number];
@@ -56,22 +60,6 @@ export function supportsReference(config: AppConfig, model: ModelOption): boolea
 export type FieldErrors = Partial<Record<string, string>>;
 
 export type ValidationResult = { ok: true; payload: GenerateRequest } | { ok: false; errors: FieldErrors };
-
-/** Fields (other than prompt) that live inside the collapsible "詳細設定" section. */
-const ADVANCED_FIELDS = new Set<string>([
-  "negative_prompt",
-  "scheduler",
-  "width",
-  "height",
-  "num_inference_steps",
-  "guidance_scale",
-  "seed",
-  "quality",
-]);
-
-export function hasAdvancedFieldError(errors: FieldErrors): boolean {
-  return Object.keys(errors).some((name) => ADVANCED_FIELDS.has(name));
-}
 
 export function findModel(config: AppConfig, id: string): ModelOption {
   return config.models.find((m) => m.id === id) ?? config.models[0]!;

@@ -12,9 +12,9 @@ describe("presentError", () => {
     expect(p.recheckHealth).toBe(true);
   });
 
-  it("opens advanced settings for out-of-memory without an inquiry ID", () => {
+  it("shows the size/steps tab for out-of-memory, without an inquiry ID", () => {
     const p = presentError(apiError(503, "gpu_out_of_memory"));
-    expect(p.openAdvanced).toBe(true);
+    expect(p.showTab).toBe("advanced");
     expect(p.message).toBe("msg");
   });
 
@@ -24,10 +24,10 @@ describe("presentError", () => {
     expect(presentError(apiError(429, "server_busy")).message).toBe("msg");
   });
 
-  it("maps field errors and opens advanced settings for non-prompt fields", () => {
+  it("maps field errors and shows the tab of the first one", () => {
     const p = presentError(apiError(422, "invalid_input", [{ field: "width", message: "8の倍数" }]));
     expect(p.fieldErrors).toEqual({ width: "8の倍数" });
-    expect(p.openAdvanced).toBe(true);
+    expect(p.showTab).toBe("advanced");
     expect(p.message).toBe("msg");
   });
 

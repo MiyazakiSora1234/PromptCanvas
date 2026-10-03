@@ -5,9 +5,9 @@ import { usePresets } from "../hooks/usePresets";
 import { applyPreset, captureSettings } from "../lib/presets";
 import { ImageFileError, readImageFile, sizeForAspect } from "../lib/images";
 import { presentError } from "../lib/presentError";
+import { firstErrorTab, type TabId } from "../lib/formTabs";
 import {
   findModel,
-  hasAdvancedFieldError,
   initialFormState,
   modelDefaultValues,
   supportsReference,
@@ -54,15 +54,16 @@ export function Workspace({
   const [form, setForm] = useState<FormState>(() => initialFormState(config));
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [message, setMessage] = useState<string | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [focusRequest, setFocusRequest] = useState(0);
   const { busy, startedAt, result, generate } = useImageGeneration();
   const presets = usePresets(config);
 
-  const showErrors = (text: string, errors: FieldErrors, openAdvanced: boolean) => {
+  /** Show a message and field errors, switching to the tab that holds the first one. */
+  const showErrors = (text: string, errors: FieldErrors, tab: TabId | null) => {
     setMessage(text);
     setFieldErrors(errors);
-    if (openAdvanced) setAdvancedOpen(true);
+    if (tab) setActiveTab(tab);
     if (Object.keys(errors).length > 0) setFocusRequest((n) => n + 1);
   };
 
@@ -174,7 +175,7 @@ export function Workspace({
 
     const validation = validateForm(form, config);
     if (!validation.ok) {
-      showErrors("入力内容を確認してください。", validation.errors, hasAdvancedFieldError(validation.errors));
+      showErrors("入力内容を確認してください。", validation.errors, firstErrorTab(validation.errors));
       return;
     }
 
@@ -188,14 +189,14 @@ export function Workspace({
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       const presented = presentError(err);
-      showErrors(presented.message, presented.fieldErrors, presented.openAdvanced);
+      showErrors(presented.message, presented.fieldErrors, presented.showTab);
       if (presented.recheckHealth || switching) onRecheckHealth();
     }
   };
 
   const handleReuseSeed = (seed: number) => {
     handleValueChange("seed", String(seed));
-    setAdvancedOpen(true);
+    setActiveTab("advanced"); // where the seed field lives
   };
 
   const switchingModel = loadedModel !== null && form.values.model !== loadedModel;
@@ -231,8 +232,8 @@ export function Workspace({
         presets={presets}
         onApplyPreset={handleApplyPreset}
         onSavePreset={handleSavePreset}
-        advancedOpen={advancedOpen}
-        onAdvancedOpenChange={setAdvancedOpen}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         onSubmit={() => void handleSubmit()}
         busy={busy}
         submitDisabled={busy || modelBlocked}

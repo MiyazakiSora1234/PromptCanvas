@@ -1,5 +1,7 @@
-import { useEffect, useRef, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
 import type { AppConfig } from "../api/types";
+import type { PresetStore } from "../hooks/usePresets";
+import { TAB_LABELS, TAB_ORDER, tabsWithErrors, type TabId } from "../lib/formTabs";
 import {
   compatibleLoras,
   findModel,
@@ -10,22 +12,17 @@ import {
   type FormValues,
   type LoraSelection,
 } from "../lib/validation";
+import { makeControlProps } from "./formControl";
 import { InitImagePicker } from "./InitImagePicker";
-import type { PresetStore } from "../hooks/usePresets";
 import { LoraPicker } from "./LoraPicker";
 import { PresetBar } from "./PresetBar";
 import { ReferencePicker } from "./ReferencePicker";
-import { buttonClass, inputClass, primaryButtonClass } from "./styles";
+import { AdvancedSettings } from "./settings/AdvancedSettings";
+import { BasicSettings } from "./settings/BasicSettings";
+import { SettingsSummary } from "./settings/SettingsSummary";
+import { inputClass, primaryButtonClass } from "./styles";
+import { TabPanel, Tabs, type TabItem } from "./Tabs";
 import { Alert, Field, Panel } from "./ui";
-
-const SIZE_PRESETS: ReadonlyArray<readonly [number, number]> = [
-  [512, 512],
-  [768, 512],
-  [512, 768],
-  [1024, 1024],
-  [1216, 832],
-  [832, 1216],
-];
 
 interface GenerateFormProps {
   config: AppConfig;
@@ -45,8 +42,8 @@ interface GenerateFormProps {
   presets: PresetStore;
   onApplyPreset: (id: string) => string;
   onSavePreset: (name: string) => string;
-  advancedOpen: boolean;
-  onAdvancedOpenChange: (open: boolean) => void;
+  activeTab: TabId;
+  onTabChange: (tab: TabId) => void;
   onSubmit: () => void;
   busy: boolean;
   submitDisabled: boolean;
@@ -55,6 +52,8 @@ interface GenerateFormProps {
   /** Incremented by the parent to move focus to the first field with an error. */
   focusRequest: number;
 }
+
+const TABS_ID = "settings";
 
 export function GenerateForm({
   config,
@@ -72,8 +71,8 @@ export function GenerateForm({
   presets,
   onApplyPreset,
   onSavePreset,
-  advancedOpen,
-  onAdvancedOpenChange,
+  activeTab,
+  onTabChange,
   onSubmit,
   busy,
   submitDisabled,
@@ -85,9 +84,10 @@ export function GenerateForm({
   const { limits } = config;
   const { values } = state;
   const model = findModel(config, values.model);
-  const format = config.output_formats.find((f) => f.id === values.output_format);
   const needsDownload = (id: string) => cachedModels !== null && !cachedModels.includes(id);
+  const control = makeControlProps(values, fieldErrors, onValueChange);
 
+  // Runs after the parent switched to the tab holding the first error, so the field is visible.
   useEffect(() => {
     if (focusRequest === 0) return;
     const first = FIELD_NAMES.find((name) => fieldErrors[name]);
@@ -96,17 +96,6 @@ export function GenerateForm({
     // Only when explicitly requested, not on every error change (that would steal focus while typing).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest]);
-
-  const controlProps = (name: keyof FormValues) => ({
-    id: name,
-    name,
-    value: values[name],
-    onChange: (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      onValueChange(name, e.target.value),
-    "aria-invalid": fieldErrors[name] ? true : undefined,
-    "aria-describedby": fieldErrors[name] ? `${name}-error` : undefined,
-    className: inputClass,
-  });
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -120,56 +109,24 @@ export function GenerateForm({
     }
   };
 
+  const errorTabs = tabsWithErrors(fieldErrors);
+  const referenceCount = [state.initImage, state.faceImage, state.poseImage].filter(Boolean).length;
+  const tabs: TabItem<TabId>[] = TAB_ORDER.map((id) => ({
+    id,
+    label: TAB_LABELS[id],
+    badge:
+      id === "images" && referenceCount > 0
+        ? "●"
+        : id === "lora" && state.loras.length > 0
+          ? `(${state.loras.length})`
+          : undefined,
+    hasError: errorTabs.has(id),
+  }));
   const promptLength = values.prompt.trim().length;
-  const sizePresets = SIZE_PRESETS.filter(
-    ([w, h]) => Math.max(w, h) <= limits.max_image_size && Math.min(w, h) >= limits.min_image_size,
-  );
-  const batchSizes = Array.from({ length: limits.max_batch_size }, (_, i) => i + 1);
 
   return (
     <Panel>
       <form ref={formRef} noValidate onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="flex flex-col gap-4">
-        <PresetBar config={config} presets={presets} disabled={busy} onApply={onApplyPreset} onSave={onSavePreset} />
-
-        <Field id="model" label="モデル" error={fieldErrors.model} hint={model.description}>
-          <select {...controlProps("model")} onChange={(e) => onModelChange(e.target.value)} disabled={busy}>
-            {config.models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-                {needsDownload(m.id) ? "（要ダウンロード）" : ""}
-              </option>
-            ))}
-          </select>
-          {needsDownload(model.id) && (
-            <p role="note" className="rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-              このモデルはまだダウンロードされていません。初回の生成時に
-              {model.download_size_gb ? `約${model.download_size_gb}GB の` : ""}
-              ダウンロードが行われ、回線速度によって数分〜数十分かかります（サーバーで{" "}
-              <code>make download-model</code> を実行しておくと待たずに使えます）。
-            </p>
-          )}
-        </Field>
-
-        <Field
-          id="style"
-          label="スタイル"
-          error={fieldErrors.style}
-          hint={
-            values.style === "photo"
-              ? "肌のきめ・毛穴などの質感を出す語句と、つるつるした肌・CG っぽさを避ける語句をプロンプトに自動で加えます。"
-              : undefined
-          }
-        >
-          <select {...controlProps("style")}>
-            {config.styles.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-                {s.id === model.defaults.style && s.id !== "none" ? "（このモデルの推奨）" : ""}
-              </option>
-            ))}
-          </select>
-        </Field>
-
         <Field
           id="prompt"
           label={
@@ -181,7 +138,7 @@ export function GenerateForm({
           error={fieldErrors.prompt}
         >
           <textarea
-            {...controlProps("prompt")}
+            {...control("prompt")}
             rows={4}
             maxLength={limits.max_prompt_length}
             placeholder="例: a watercolor painting of a lighthouse at sunset, soft light, highly detailed"
@@ -195,240 +152,92 @@ export function GenerateForm({
           </div>
         </Field>
 
-        <InitImagePicker
-          limits={limits}
-          image={state.initImage}
-          strength={values.strength}
-          steps={values.num_inference_steps}
-          imageError={fieldErrors.init_image}
-          strengthError={fieldErrors.strength}
-          disabled={busy}
-          unavailableReason={
-            state.faceImage || state.poseImage
-              ? "顔・ポーズの参照と同時には使えません。参照画像を外すと選べます。"
-              : undefined
-          }
-          onFile={onInitImageFile}
-          onClear={onInitImageClear}
-          onStrengthChange={(v) => onValueChange("strength", v)}
-        />
+        <div className="flex flex-col gap-3">
+          <Tabs idPrefix={TABS_ID} label="生成の設定" items={tabs} active={activeTab} onChange={onTabChange} />
 
-        <ReferencePicker
-          config={config}
-          state={state}
-          supported={supportsReference(config, model)}
-          modelLabel={model.label}
-          assetsCached={identityCached}
-          fieldErrors={fieldErrors}
-          disabled={busy}
-          onFaceFile={(file) => onReferenceFile("face", file)}
-          onPoseFile={(file) => onReferenceFile("pose", file)}
-          onClearFace={() => onReferenceClear("face")}
-          onClearPose={() => onReferenceClear("pose")}
-          onValueChange={onValueChange}
-        />
+          <TabPanel idPrefix={TABS_ID} id="basic" active={activeTab === "basic"}>
+            <BasicSettings
+              config={config}
+              model={model}
+              values={values}
+              fieldErrors={fieldErrors}
+              control={control}
+              needsDownload={needsDownload}
+              busy={busy}
+              onModelChange={onModelChange}
+              onValueChange={onValueChange}
+            />
+          </TabPanel>
 
-        <div className="grid grid-cols-2 gap-3">
-          <fieldset className="flex min-w-0 flex-col gap-1">
-            <legend className="mb-1 text-sm font-semibold">枚数</legend>
-            <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="枚数">
-              {batchSizes.map((n) => (
-                <label key={n} className="cursor-pointer">
-                  <input
-                    type="radio"
-                    name="num_images"
-                    value={n}
-                    checked={values.num_images === String(n)}
-                    onChange={() => onValueChange("num_images", String(n))}
-                    className="peer sr-only"
-                  />
-                  <span
-                    className={`${buttonClass} px-3 py-1 text-sm peer-checked:border-indigo-600 peer-checked:bg-indigo-50 peer-checked:text-indigo-700 peer-focus-visible:outline-2 peer-focus-visible:outline-indigo-600 dark:peer-checked:bg-indigo-950 dark:peer-checked:text-indigo-300`}
-                  >
-                    {n}
-                  </span>
-                </label>
-              ))}
-            </div>
-            {fieldErrors.num_images && (
-              <p className="text-xs text-red-700 dark:text-red-300">{fieldErrors.num_images}</p>
-            )}
-          </fieldset>
-          <Field id="output_format" label="画像形式" error={fieldErrors.output_format}>
-            <select {...controlProps("output_format")}>
-              {config.output_formats.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <TabPanel idPrefix={TABS_ID} id="images" active={activeTab === "images"}>
+            <InitImagePicker
+              limits={limits}
+              image={state.initImage}
+              strength={values.strength}
+              steps={values.num_inference_steps}
+              imageError={fieldErrors.init_image}
+              strengthError={fieldErrors.strength}
+              disabled={busy}
+              unavailableReason={
+                state.faceImage || state.poseImage
+                  ? "顔・ポーズの参照と同時には使えません。参照画像を外すと選べます。"
+                  : undefined
+              }
+              onFile={onInitImageFile}
+              onClear={onInitImageClear}
+              onStrengthChange={(v) => onValueChange("strength", v)}
+            />
+            <ReferencePicker
+              config={config}
+              state={state}
+              supported={supportsReference(config, model)}
+              modelLabel={model.label}
+              assetsCached={identityCached}
+              fieldErrors={fieldErrors}
+              disabled={busy}
+              onFaceFile={(file) => onReferenceFile("face", file)}
+              onPoseFile={(file) => onReferenceFile("pose", file)}
+              onClearFace={() => onReferenceClear("face")}
+              onClearPose={() => onReferenceClear("pose")}
+              onValueChange={onValueChange}
+            />
+          </TabPanel>
+
+          <TabPanel idPrefix={TABS_ID} id="lora" active={activeTab === "lora"}>
+            <LoraPicker
+              limits={limits}
+              options={compatibleLoras(config, model)}
+              modelLabel={model.label}
+              selected={state.loras}
+              error={fieldErrors.loras}
+              onChange={onLorasChange}
+            />
+          </TabPanel>
+
+          <TabPanel idPrefix={TABS_ID} id="advanced" active={activeTab === "advanced"}>
+            <AdvancedSettings
+              limits={limits}
+              schedulers={config.schedulers}
+              model={model}
+              values={values}
+              fieldErrors={fieldErrors}
+              control={control}
+              onValueChange={onValueChange}
+            />
+          </TabPanel>
+
+          <TabPanel idPrefix={TABS_ID} id="presets" active={activeTab === "presets"}>
+            <PresetBar config={config} presets={presets} disabled={busy} onApply={onApplyPreset} onSave={onSavePreset} />
+          </TabPanel>
         </div>
 
-        <LoraPicker
-          limits={limits}
-          options={compatibleLoras(config, model)}
-          modelLabel={model.label}
-          selected={state.loras}
-          error={fieldErrors.loras}
-          onChange={onLorasChange}
-        />
-
-        <details open={advancedOpen} onToggle={(e) => onAdvancedOpenChange(e.currentTarget.open)}>
-          <summary className="mb-3 cursor-pointer font-semibold">詳細設定</summary>
-          <div className="flex flex-col gap-4">
-            <Field id="negative_prompt" label="ネガティブプロンプト" error={fieldErrors.negative_prompt}>
-              <textarea
-                {...controlProps("negative_prompt")}
-                rows={2}
-                maxLength={limits.max_prompt_length}
-                placeholder="例: blurry, low quality, watermark"
-                className={`${inputClass} resize-y`}
-              />
-            </Field>
-
-            <Field
-              id="scheduler"
-              label="サンプラー"
-              error={fieldErrors.scheduler}
-              hint="ノイズを取り除く手順です。速度や仕上がりが変わり、モデルとの相性があります。"
-            >
-              <select {...controlProps("scheduler")}>
-                {config.schedulers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                    {s.id === model.defaults.scheduler ? "（このモデルの推奨）" : ""}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <fieldset className="flex flex-col gap-2">
-              <legend className="mb-1 text-sm font-semibold">画像サイズ（px）</legend>
-              <div className="flex flex-wrap gap-1.5">
-                {sizePresets.map(([w, h]) => {
-                  const selected = values.width === String(w) && values.height === String(h);
-                  return (
-                    <button
-                      key={`${w}x${h}`}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => {
-                        onValueChange("width", String(w));
-                        onValueChange("height", String(h));
-                      }}
-                      className={`${buttonClass} px-2 py-1 text-xs aria-pressed:border-indigo-600 aria-pressed:text-indigo-700 dark:aria-pressed:text-indigo-300`}
-                    >
-                      {w}×{h}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field id="width" label="幅" error={fieldErrors.width}>
-                  <input
-                    {...controlProps("width")}
-                    type="number"
-                    inputMode="numeric"
-                    min={limits.min_image_size}
-                    max={limits.max_image_size}
-                    step={limits.size_multiple}
-                  />
-                </Field>
-                <Field id="height" label="高さ" error={fieldErrors.height}>
-                  <input
-                    {...controlProps("height")}
-                    type="number"
-                    inputMode="numeric"
-                    min={limits.min_image_size}
-                    max={limits.max_image_size}
-                    step={limits.size_multiple}
-                  />
-                </Field>
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {limits.size_multiple}の倍数で指定してください。このモデルの基本サイズは {model.defaults.width}×
-                {model.defaults.height} です。大きいほど時間と GPU メモリを消費します。
-              </p>
-            </fieldset>
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field id="num_inference_steps" label="ステップ数" error={fieldErrors.num_inference_steps}>
-                <input
-                  {...controlProps("num_inference_steps")}
-                  type="number"
-                  inputMode="numeric"
-                  min={limits.min_steps}
-                  max={limits.max_steps}
-                  step={1}
-                />
-              </Field>
-              <Field id="guidance_scale" label="ガイダンススケール" error={fieldErrors.guidance_scale}>
-                <input
-                  {...controlProps("guidance_scale")}
-                  type="number"
-                  inputMode="decimal"
-                  min={limits.min_guidance_scale}
-                  max={limits.max_guidance_scale}
-                  step={0.5}
-                />
-              </Field>
-            </div>
-
-            <Field
-              id="seed"
-              label="シード値"
-              error={fieldErrors.seed}
-              hint="同じシードと設定で同じ画像を再現できます。複数枚のときは 1 枚ごとに +1 されます。"
-            >
-              <div className="flex gap-2">
-                <input
-                  {...controlProps("seed")}
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  max={limits.seed_max}
-                  step={1}
-                  placeholder="空欄でランダム"
-                  className={`${inputClass} min-w-0 flex-1`}
-                />
-                <button type="button" className={buttonClass} onClick={() => onValueChange("seed", "")}>
-                  ランダム
-                </button>
-              </div>
-            </Field>
-
-            {format?.lossy && (
-              <div className="flex flex-col gap-1">
-                <label htmlFor="quality" className="flex justify-between text-sm font-semibold">
-                  <span>画質（{format.id.toUpperCase()}）</span>
-                  <span className="tabular-nums">{values.quality}</span>
-                </label>
-                <input
-                  id="quality"
-                  name="quality"
-                  type="range"
-                  min={limits.min_quality}
-                  max={limits.max_quality}
-                  step={1}
-                  value={values.quality}
-                  aria-invalid={fieldErrors.quality ? true : undefined}
-                  onChange={(e) => onValueChange("quality", e.target.value)}
-                  className="accent-indigo-600"
-                />
-                <p className="text-xs text-slate-500 dark:text-slate-400">高いほどきれいで、ファイルが大きくなります。</p>
-                {fieldErrors.quality && (
-                  <p className="text-xs text-red-700 dark:text-red-300">{fieldErrors.quality}</p>
-                )}
-              </div>
-            )}
-          </div>
-        </details>
-
-        <button type="submit" disabled={submitDisabled} className={`${primaryButtonClass} w-full py-3 text-base`}>
-          {submitLabel}
-        </button>
-        {message && <Alert>{message}</Alert>}
+        <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+          <SettingsSummary config={config} state={state} />
+          <button type="submit" disabled={submitDisabled} className={`${primaryButtonClass} w-full py-3 text-base`}>
+            {submitLabel}
+          </button>
+          {message && <Alert>{message}</Alert>}
+        </div>
       </form>
     </Panel>
   );

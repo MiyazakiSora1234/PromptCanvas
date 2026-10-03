@@ -42,17 +42,14 @@ export function PresetBar({ config, presets, disabled, onApply, onSave }: Preset
   };
 
   return (
-    <section
-      aria-labelledby="preset-heading"
-      className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40"
-    >
+    <section aria-labelledby="preset-heading" className="flex flex-col gap-2">
       <h2 id="preset-heading" className="text-sm font-semibold">
         設定プリセット
       </h2>
 
       <div className="flex gap-2">
         <label htmlFor="preset" className="sr-only">
-          プリセット
+          使うプリセット
         </label>
         <select
           id="preset"

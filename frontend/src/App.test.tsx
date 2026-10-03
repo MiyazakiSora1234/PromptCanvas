@@ -45,6 +45,8 @@ async function renderReady() {
 
 const promptBox = () => screen.getByLabelText(/^プロンプト/);
 const generateButton = () => screen.getByRole("button", { name: /生成/ });
+const tab = (name: string) => screen.getByRole("tab", { name: new RegExp(`^${name}`) });
+const openTab = (user: ReturnType<typeof userEvent.setup>, name: string) => user.click(tab(name));
 
 describe("App", () => {
   it("generates an image and offers it as a download", async () => {
@@ -52,6 +54,7 @@ describe("App", () => {
     const user = await renderReady();
 
     await user.type(promptBox(), "  a lighthouse  ");
+    await openTab(user, "詳細");
     await user.type(screen.getByLabelText("シード値"), "42");
     await user.click(screen.getByRole("button", { name: "画像を生成" }));
 
@@ -91,12 +94,17 @@ describe("App", () => {
     const user = await renderReady();
 
     await user.type(promptBox(), "a cat");
+    await openTab(user, "詳細");
     const width = screen.getByLabelText("幅");
     await user.clear(width);
     await user.type(width, "500");
+    await openTab(user, "基本");
     await user.click(generateButton());
 
-    expect(await screen.findByText("8の倍数で指定してください。")).toBeInTheDocument();
+    // The form switches to the tab holding the error, marks it, and focuses the field.
+    expect(await screen.findByText("8の倍数で指定してください。")).toBeVisible();
+    expect(tab("詳細")).toHaveAttribute("aria-selected", "true");
+    expect(within(tab("詳細")).getByRole("img", { name: "入力エラーあり" })).toBeInTheDocument();
     expect(width).toHaveAttribute("aria-invalid", "true");
     expect(width).toHaveFocus();
     expect(screen.getByRole("alert")).toHaveTextContent("入力内容を確認してください。");
@@ -152,14 +160,18 @@ describe("App", () => {
     const { generateCalls } = mockServer();
     const user = await renderReady();
 
+    await openTab(user, "LoRA");
     expect(screen.getByText(/で使える LoRA はありません/)).toBeInTheDocument();
+    await openTab(user, "基本");
     await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
 
     expect(screen.getByLabelText("幅")).toHaveValue(1024);
     expect(screen.getByLabelText("サンプラー")).toHaveValue("euler_a");
     expect(screen.getByLabelText("スタイル")).toHaveValue("photo");
     expect(screen.getByText(/肌のきめ・毛穴などの質感/)).toBeInTheDocument();
+    await openTab(user, "LoRA");
     await user.click(screen.getByRole("checkbox", { name: /Pixel Art XL/ }));
+    expect(tab("LoRA")).toHaveTextContent("(1)");
     expect(screen.getByText(/pixel art/)).toBeInTheDocument();
 
     await user.type(promptBox(), "pixel art, a cat");
@@ -176,8 +188,11 @@ describe("App", () => {
     });
 
     // Switching back drops the SDXL-only LoRA.
+    await openTab(user, "基本");
     await user.selectOptions(screen.getByLabelText("モデル"), "sd15");
+    await openTab(user, "LoRA");
     expect(screen.queryByRole("checkbox", { name: /Pixel Art XL/ })).not.toBeInTheDocument();
+    expect(tab("LoRA")).not.toHaveTextContent("(1)");
   });
 
   it("warns before picking a model that still has to be downloaded", async () => {
@@ -195,7 +210,9 @@ describe("App", () => {
     const user = await renderReady();
 
     await user.type(promptBox(), "a cat");
+    await openTab(user, "詳細");
     await user.type(screen.getByLabelText("シード値"), "10");
+    await openTab(user, "基本");
     await user.click(within(screen.getByRole("radiogroup", { name: "枚数" })).getByLabelText("4"));
     await user.click(generateButton());
 
@@ -227,7 +244,9 @@ describe("App", () => {
     const user = await renderReady();
 
     const file = new File(["x"], "photo.png", { type: "image/png" });
+    await openTab(user, "画像参照");
     await user.upload(screen.getByLabelText("元画像ファイル"), file);
+    expect(tab("画像参照")).toHaveTextContent("●");
 
     expect(await screen.findByAltText("元画像のプレビュー")).toBeInTheDocument();
     expect(screen.getByText("photo.png")).toBeInTheDocument();
@@ -254,10 +273,13 @@ describe("App", () => {
     const user = await renderReady();
 
     // SD 1.5 can't use references.
+    await openTab(user, "画像参照");
     expect(screen.getByText(/「SD 1.5」では使えません/)).toBeInTheDocument();
     expect(screen.queryByLabelText("顔の写真ファイル")).not.toBeInTheDocument();
 
+    await openTab(user, "基本");
     await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
+    await openTab(user, "画像参照");
     await user.upload(screen.getByLabelText("顔の写真ファイル"), new File(["f"], "me.png", { type: "image/png" }));
     await user.upload(screen.getByLabelText("ポーズ参考画像ファイル"), new File(["p"], "pose.png", { type: "image/png" }));
 
@@ -283,21 +305,28 @@ describe("App", () => {
       init_image: null,
     });
     expect(screen.getByText("顔の参照")).toBeInTheDocument();
+    expect(screen.getByLabelText("現在の設定")).toHaveTextContent("顔の参照・ポーズ参照");
 
     // Switching to a model without reference support drops the images.
+    await openTab(user, "基本");
     await user.selectOptions(screen.getByLabelText("モデル"), "sd15");
     await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
+    await openTab(user, "画像参照");
     expect(screen.queryByAltText("顔の写真のプレビュー")).not.toBeInTheDocument();
+    expect(tab("画像参照")).not.toHaveTextContent("●");
   });
 
   it("applies the built-in realistic-human preset", async () => {
     const { generateCalls } = mockServer();
     const user = await renderReady();
 
-    await user.selectOptions(screen.getByLabelText("プリセット"), "realistic-human");
+    await openTab(user, "プリセット");
+    await user.selectOptions(screen.getByLabelText("使うプリセット"), "realistic-human");
     expect(screen.getByText("人物写真向け")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "適用" }));
     expect(await screen.findByText("「リアルな人間」を適用しました。")).toBeInTheDocument();
+    // The summary shows the result without opening the other tabs.
+    expect(screen.getByLabelText("現在の設定")).toHaveTextContent("SDXL・リアルな写真・896×1152・30ステップ");
 
     expect(screen.getByLabelText("モデル")).toHaveValue("sdxl");
     expect(screen.getByLabelText("スタイル")).toHaveValue("photo");
@@ -326,9 +355,11 @@ describe("App", () => {
     const user = await renderReady();
 
     await user.selectOptions(screen.getByLabelText("画像形式"), "webp");
+    await openTab(user, "詳細");
     const steps = screen.getByLabelText("ステップ数");
     await user.clear(steps);
     await user.type(steps, "40");
+    await openTab(user, "プリセット");
     await user.type(screen.getByLabelText("保存する名前"), "速い WebP{Enter}");
     expect(await screen.findByText("「速い WebP」を保存しました。")).toBeInTheDocument();
 
@@ -336,7 +367,8 @@ describe("App", () => {
     cleanup();
     mockServer();
     await renderReady();
-    await user.selectOptions(screen.getByLabelText("プリセット"), screen.getByRole("option", { name: "速い WebP" }));
+    await openTab(user, "プリセット");
+    await user.selectOptions(screen.getByLabelText("使うプリセット"), screen.getByRole("option", { name: "速い WebP" }));
     await user.click(screen.getByRole("button", { name: "適用" }));
     expect(screen.getByLabelText("画像形式")).toHaveValue("webp");
     expect(screen.getByLabelText("ステップ数")).toHaveValue(40);
