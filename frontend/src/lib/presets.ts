@@ -42,7 +42,7 @@ export function captureSettings(state: FormState, { includePrompt = true } = {})
   };
 }
 
-export type ApplyResult = { ok: true; state: FormState; warnings: string[] } | { ok: false; error: string };
+type ApplyResult = { ok: true; state: FormState; warnings: string[] } | { ok: false; error: string };
 
 /**
  * Apply a preset on top of the current form: start from the preset model's defaults, then

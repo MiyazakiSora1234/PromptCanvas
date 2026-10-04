@@ -68,7 +68,7 @@ def encode_image(img: Image.Image, fmt: OutputFormat, quality: int) -> bytes:
     if fmt == "png":
         img.save(buffer, format="PNG")
     elif fmt == "jpeg":
-        img.convert("RGB").save(buffer, format="JPEG", quality=quality, optimize=True)
+        img.save(buffer, format="JPEG", quality=quality, optimize=True)
     else:
         img.save(buffer, format="WEBP", quality=quality, method=4)
     return buffer.getvalue()

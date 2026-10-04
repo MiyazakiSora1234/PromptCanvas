@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchConfig } from "../api/client";
 import type { AppConfig } from "../api/types";
 
-export type ConfigState = { kind: "loading" } | { kind: "ready"; config: AppConfig } | { kind: "unreachable" };
+type ConfigState = { kind: "loading" } | { kind: "ready"; config: AppConfig } | { kind: "unreachable" };
 
 /** Loads input limits/defaults from the server, retrying until it answers. */
 export function useAppConfig(retryMs = 5000): ConfigState {

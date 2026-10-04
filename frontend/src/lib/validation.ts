@@ -1,4 +1,4 @@
-// Client-side validation. Mirrors backend/app/schemas.py#build_params; the server
+// Client-side validation. Mirrors backend/app/api/validation.py; the server
 // re-validates everything, this only gives faster feedback.
 import type { AppConfig, GenerateRequest, LoraOption, ModelOption, OutputFormat } from "../api/types";
 import type { PickedImage } from "./images";
@@ -59,7 +59,7 @@ export function supportsReference(config: AppConfig, model: ModelOption): boolea
 /** Keyed by field name; may also contain server-side names such as "body". */
 export type FieldErrors = Partial<Record<string, string>>;
 
-export type ValidationResult = { ok: true; payload: GenerateRequest } | { ok: false; errors: FieldErrors };
+type ValidationResult = { ok: true; payload: GenerateRequest } | { ok: false; errors: FieldErrors };
 
 export function findModel(config: AppConfig, id: string): ModelOption {
   return config.models.find((m) => m.id === id) ?? config.models[0]!;

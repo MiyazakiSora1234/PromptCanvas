@@ -110,8 +110,6 @@ async def generate(
         generator.status.ensure_ready()
 
         async with limiter.slot():
-            if cancel.is_set():  # cancelled while waiting in the queue
-                raise GenerationCancelledError()
             started = time.perf_counter()
             try:
                 result = await anyio.to_thread.run_sync(generator.generate, params, cancel)

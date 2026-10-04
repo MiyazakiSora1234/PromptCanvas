@@ -84,7 +84,6 @@ def batch_seeds(seed: int | None, count: int) -> list[int]:
 
 class DiffusersGenerator:
     def __init__(self, settings: Settings, catalog: Catalog) -> None:
-        self._settings = settings
         self._catalog = catalog
         self._runtime = Runtime(settings)
         self._models = ModelManager(catalog, self._runtime)
@@ -149,10 +148,10 @@ class DiffusersGenerator:
             kwargs["callback_on_step_end"] = self._step_callback(loaded, params, cancel)
             output = self._run(pipe, kwargs, loaded, params)
 
-        result = self._encode(output, params, seeds)
+        images, filtered = self._encode(output, params, seeds)
         return GenerationResult(
-            images=result.images,
-            filtered_count=result.filtered_count,
+            images=images,
+            filtered_count=filtered,
             translated_prompt=prompt if translated else None,
             translated_negative_prompt=negative_prompt if translated and params.negative_prompt else None,
         )
@@ -169,7 +168,7 @@ class DiffusersGenerator:
         else:
             pipe = loaded.text2img
         pipe.scheduler = build_scheduler(params.scheduler, loaded.original_scheduler)
-        if self._settings.enable_cpu_offload and self._runtime.is_cuda:
+        if self._runtime.settings.enable_cpu_offload and self._runtime.is_cuda:
             pipe.enable_model_cpu_offload()  # (re)install hooks on the pipeline actually used
 
         kwargs: dict[str, Any] = {
@@ -221,7 +220,8 @@ class DiffusersGenerator:
                     self._references.park()
 
     @staticmethod
-    def _encode(output: Any, params: GenerationParams, seeds: list[int]) -> GenerationResult:
+    def _encode(output: Any, params: GenerationParams, seeds: list[int]) -> tuple[list[GeneratedImage], int]:
+        """Encoded images (minus any the safety checker flagged) and how many were filtered out."""
         images = getattr(output, "images", None)
         if not images:
             raise GenerationFailedError()
@@ -235,4 +235,4 @@ class DiffusersGenerator:
         ]
         if not kept:
             raise ContentFilteredError()
-        return GenerationResult(images=kept, filtered_count=len(images) - len(kept))
+        return kept, len(images) - len(kept)

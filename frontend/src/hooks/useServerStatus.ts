@@ -44,16 +44,12 @@ export function useServerStatus(): { status: ServerStatus; refresh: () => void }
   return { status, refresh };
 }
 
+/**
+ * A model is being loaded: generating is disabled meanwhile. A failed model does not block
+ * (the user can retry or pick another model); unknown/offline lets the request report it.
+ */
 export function isModelLoading(status: ServerStatus): boolean {
   return status.kind === "online" && (status.health.status === "loading" || status.health.status === "not_loaded");
-}
-
-/**
- * The button is disabled only while a model is loading. A failed model does not block:
- * the user can retry or pick another model. Unknown/offline: let the request report it.
- */
-export function isModelBlocked(status: ServerStatus): boolean {
-  return isModelLoading(status);
 }
 
 /** Downloaded model ids, or null while unknown (don't warn about downloads we can't confirm). */

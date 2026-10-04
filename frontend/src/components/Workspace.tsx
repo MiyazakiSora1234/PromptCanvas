@@ -24,7 +24,6 @@ import { ResultPanel } from "./ResultPanel";
 interface WorkspaceProps {
   config: AppConfig;
   /** A model is being loaded: generation is disabled. */
-  modelBlocked: boolean;
   modelLoading: boolean;
   /** Catalog id of the model currently on the GPU, if known. */
   loadedModel: string | null;
@@ -49,7 +48,6 @@ function withoutKeys(errors: FieldErrors, keys: string[]): FieldErrors {
 
 export function Workspace({
   config,
-  modelBlocked,
   modelLoading,
   loadedModel,
   cachedModels,
@@ -283,7 +281,7 @@ export function Workspace({
         onTabChange={setActiveTab}
         onSubmit={() => void handleSubmit()}
         busy={busy}
-        submitDisabled={busy || modelBlocked}
+        submitDisabled={busy || modelLoading}
         focusRequest={focusRequest}
       />
       {/* The result with the generate button right under the image; stays in view while settings scroll. */}
@@ -293,7 +291,7 @@ export function Workspace({
             config={config}
             state={form}
             formId={FORM_ID}
-            disabled={busy || modelBlocked}
+            disabled={busy || modelLoading}
             label={submitLabel}
             message={message}
             onCancel={busy ? () => void cancel() : null}

@@ -2,7 +2,7 @@ import { ApiError, NetworkError } from "../api/client";
 import { firstErrorTab, type TabId } from "./formTabs";
 import type { FieldErrors } from "./validation";
 
-export interface ErrorPresentation {
+interface ErrorPresentation {
   message: string;
   fieldErrors: FieldErrors;
   /** Settings tab to show so the user can see / change the relevant inputs (null: stay). */

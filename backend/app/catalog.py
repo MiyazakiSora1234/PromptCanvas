@@ -242,29 +242,40 @@ class Catalog(BaseModel):
         return model
 
     def check_against(self, settings: Settings) -> None:
-        """Model defaults must be valid inputs under the configured limits."""
+        """Model defaults and preset values must be valid inputs under the configured limits."""
         for m in self.models:
             d = m.defaults
-            for name, value in (("width", d.width), ("height", d.height)):
-                if not settings.min_image_size <= value <= settings.max_image_size or value % SIZE_MULTIPLE:
-                    raise ValueError(f"model '{m.id}': default {name} {value} is outside the configured limits")
-            if not 1 <= d.num_inference_steps <= settings.max_steps:
-                raise ValueError(f"model '{m.id}': default steps exceed PROMPTCANVAS_MAX_STEPS")
-            if not 0 <= d.guidance_scale <= settings.max_guidance_scale:
-                raise ValueError(f"model '{m.id}': default guidance_scale exceeds the configured maximum")
+            _check_values(
+                f"model '{m.id}': default", settings, d.width, d.height, d.num_inference_steps, d.guidance_scale
+            )
         for p in self.presets:
             s = p.settings
-            for dim, size in (("width", s.width), ("height", s.height)):
-                if size is not None and (
-                    not settings.min_image_size <= size <= settings.max_image_size or size % SIZE_MULTIPLE
-                ):
-                    raise ValueError(f"preset '{p.id}': {dim} {size} is outside the configured limits")
-            if s.num_inference_steps is not None and not 1 <= s.num_inference_steps <= settings.max_steps:
-                raise ValueError(f"preset '{p.id}': steps exceed PROMPTCANVAS_MAX_STEPS")
-            if s.guidance_scale is not None and not 0 <= s.guidance_scale <= settings.max_guidance_scale:
-                raise ValueError(f"preset '{p.id}': guidance_scale exceeds the configured maximum")
-            if s.num_images is not None and not 1 <= s.num_images <= settings.max_batch_size:
-                raise ValueError(f"preset '{p.id}': num_images exceeds PROMPTCANVAS_MAX_BATCH_SIZE")
+            _check_values(
+                f"preset '{p.id}':", settings, s.width, s.height, s.num_inference_steps, s.guidance_scale, s.num_images
+            )
+
+
+def _check_values(
+    where: str,
+    settings: Settings,
+    width: int | None,
+    height: int | None,
+    steps: int | None,
+    guidance: float | None,
+    num_images: int | None = None,
+) -> None:
+    """Raise ValueError if a value (None = not set) is outside what requests may use."""
+    for name, size in (("width", width), ("height", height)):
+        if size is not None and (
+            not settings.min_image_size <= size <= settings.max_image_size or size % SIZE_MULTIPLE
+        ):
+            raise ValueError(f"{where} {name} {size} is outside the configured limits")
+    if steps is not None and not 1 <= steps <= settings.max_steps:
+        raise ValueError(f"{where} steps exceed PROMPTCANVAS_MAX_STEPS")
+    if guidance is not None and not 0 <= guidance <= settings.max_guidance_scale:
+        raise ValueError(f"{where} guidance_scale exceeds the configured maximum")
+    if num_images is not None and not 1 <= num_images <= settings.max_batch_size:
+        raise ValueError(f"{where} num_images exceeds PROMPTCANVAS_MAX_BATCH_SIZE")
 
 
 def load_catalog(settings: Settings) -> Catalog:

@@ -2,7 +2,7 @@ import { StatusBadge } from "./components/StatusBadge";
 import { Alert } from "./components/ui";
 import { Workspace } from "./components/Workspace";
 import { useAppConfig } from "./hooks/useAppConfig";
-import { cachedModels, isModelBlocked, isModelLoading, loadedModel, useServerStatus } from "./hooks/useServerStatus";
+import { cachedModels, isModelLoading, loadedModel, useServerStatus } from "./hooks/useServerStatus";
 
 export default function App() {
   const configState = useAppConfig();
@@ -30,7 +30,6 @@ export default function App() {
       {config ? (
         <Workspace
           config={config}
-          modelBlocked={isModelBlocked(status)}
           modelLoading={isModelLoading(status)}
           loadedModel={loadedModel(status)}
           cachedModels={cachedModels(status)}

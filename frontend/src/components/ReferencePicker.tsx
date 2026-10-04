@@ -95,7 +95,7 @@ export function ReferencePicker({
             <span className="text-sm font-semibold">ポーズ参考画像</span>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {HELP.poseImage}
-              {state.faceImages.length > 0 ? "顔の位置もこの人物に合わせるため、顔が写っている必要があります。" : ""}
+              {state.faceImages.length > 0 ? "顔が写っていれば、顔の位置もこの人物に合わせます。" : ""}
             </p>
             <ImagePicker
               id="pose_image"

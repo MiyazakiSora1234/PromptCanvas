@@ -1,4 +1,4 @@
-// Mirrors the response models in backend/app/schemas.py.
+// Mirrors the response models in backend/app/api/schemas.py.
 
 export type ModelState = "not_loaded" | "loading" | "ready" | "failed";
 export type OutputFormat = "png" | "jpeg" | "webp";
