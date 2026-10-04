@@ -13,11 +13,12 @@ from PIL import Image
 from app.catalog import Catalog
 from app.config import Settings
 from app.errors import GenerationCancelledError
-from app.generator import GeneratedImage, GenerationResult, ModelState, ModelStatus, batch_seeds
-from app.imaging import OUTPUT_FORMATS, encode_image
+from app.generation.generator import GeneratedImage, GenerationResult, batch_seeds
+from app.generation.imaging import OUTPUT_FORMATS, encode_image
+from app.generation.models import ModelState, ModelStatus
+from app.generation.params import GenerationParams
+from app.generation.translate import has_japanese
 from app.main import create_app
-from app.schemas import GenerationParams
-from app.translate import has_japanese
 
 CATALOG = Catalog.model_validate(
     {
@@ -117,6 +118,14 @@ class FakeGenerator:
             translated_prompt=f"EN({params.prompt})" if translated else None,
             translated_negative_prompt=f"EN({negative})" if translated and negative else None,
         )
+
+
+MakeClient = Callable[..., TestClient]
+
+
+def decode_image(item: dict[str, Any]) -> Image.Image:
+    """An image from a /api/generate response."""
+    return Image.open(io.BytesIO(base64.b64decode(item["data"])))
 
 
 def make_settings(**overrides: Any) -> Settings:

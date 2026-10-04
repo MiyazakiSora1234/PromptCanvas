@@ -13,12 +13,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import api
+from .api.error_handlers import register_error_handlers
+from .api.jobs import CancelRegistry
+from .api.limiter import ConcurrencyLimiter
 from .catalog import Catalog, load_catalog
 from .config import Settings
-from .error_handlers import register_error_handlers
-from .generator import DiffusersGenerator, ImageGenerator
-from .jobs import CancelRegistry
-from .limiter import ConcurrencyLimiter
+from .generation.generator import DiffusersGenerator, ImageGenerator
 
 logger = logging.getLogger("promptcanvas")
 

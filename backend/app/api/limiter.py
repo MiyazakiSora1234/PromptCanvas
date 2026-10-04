@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from .errors import QueueTimeoutError, ServerBusyError
+from ..errors import QueueTimeoutError, ServerBusyError
 
 
 class ConcurrencyLimiter:

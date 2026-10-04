@@ -22,8 +22,8 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from .catalog import IdentityConfig
-from .errors import FieldError, InvalidInputError
+from ..catalog import IdentityConfig
+from ..errors import FieldError, InvalidInputError
 from .imaging import fit_to
 
 logger = logging.getLogger(__name__)
@@ -86,9 +86,7 @@ def draw_kps(size: tuple[int, int], kps: np.ndarray) -> Image.Image:
         y = kps[[a, b], 1]
         length = float(np.hypot(x[0] - x[1], y[0] - y[1]))
         angle = math.degrees(math.atan2(y[0] - y[1], x[0] - x[1]))
-        polygon = cv2.ellipse2Poly(
-            (int(np.mean(x)), int(np.mean(y))), (int(length / 2), stick), int(angle), 0, 360, 1
-        )
+        polygon = cv2.ellipse2Poly((int(np.mean(x)), int(np.mean(y))), (int(length / 2), stick), int(angle), 0, 360, 1)
         cv2.fillConvexPoly(canvas, np.asarray(polygon, dtype=np.int32), _KPS_COLORS[a])
     canvas = (canvas * 0.6).astype(np.uint8)
     for (x, y), color in zip(kps, _KPS_COLORS, strict=False):

@@ -87,9 +87,7 @@ class QueueTimeoutError(AppError):
 class GpuOutOfMemoryError(AppError):
     status_code = 503
     code = "gpu_out_of_memory"
-    default_message = (
-        "GPUメモリが不足しました。画像サイズ（幅・高さ）やステップ数を小さくして再度お試しください。"
-    )
+    default_message = "GPUメモリが不足しました。画像サイズ（幅・高さ）やステップ数を小さくして再度お試しください。"
 
 
 class ContentFilteredError(AppError):
@@ -173,9 +171,7 @@ def describe_load_error(exc: BaseException) -> str:
                 "環境変数 HF_TOKEN にトークンを設定してください。"
             )
         if "RepositoryNotFoundError" in names or "RevisionNotFoundError" in names:
-            return (
-                "モデルが見つかりません。PROMPTCANVAS_MODEL_ID / PROMPTCANVAS_MODEL_REVISION を確認してください。"
-            )
+            return "モデルが見つかりません。PROMPTCANVAS_MODEL_ID / PROMPTCANVAS_MODEL_REVISION を確認してください。"
         if "EntryNotFoundError" in names or "LocalEntryNotFoundError" in names:
             return (
                 "モデルファイルを取得できませんでした。ネットワーク接続、または "

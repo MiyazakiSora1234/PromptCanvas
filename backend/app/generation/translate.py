@@ -16,7 +16,10 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .catalog import TranslatorConfig
+from ..catalog import TranslatorConfig
+from ..errors import TranslationUnavailableError, describe_load_error, is_out_of_memory
+from .model_cache import are_files_cached
+from .runtime import Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -128,3 +131,37 @@ class PromptTranslator:
             self._cache.clear()
         self._cache[japanese] = english
         return english
+
+
+class PromptTranslation:
+    """Translates a request's prompts when they contain Japanese; passes English through untouched."""
+
+    def __init__(self, config: TranslatorConfig | None, runtime: Runtime) -> None:
+        self._cfg = config
+        self._runtime = runtime
+        self._translator: PromptTranslator | None = None
+        self.cached = False  # model on disk
+
+    def scan_cache(self) -> None:
+        if self._cfg is not None:
+            self.cached = are_files_cached(self._cfg.files())
+
+    def prompts(self, prompt: str, negative_prompt: str) -> tuple[str, str, bool]:
+        """(prompt, negative prompt, whether anything was translated)."""
+        if self._cfg is None or not (has_japanese(prompt) or has_japanese(negative_prompt)):
+            return prompt, negative_prompt, False
+        rt = self._runtime
+        rt.ensure()
+        if self._translator is None:
+            self._translator = PromptTranslator(self._cfg, str(rt.device), rt.dtype, rt.hf_token)
+        try:
+            prompt = self._translator.translate(prompt)
+            negative_prompt = self._translator.translate(negative_prompt)
+        except Exception as exc:
+            if is_out_of_memory(exc):
+                rt.release_memory()
+                raise
+            logger.exception("Failed to translate the prompt. %s", describe_load_error(exc))
+            raise TranslationUnavailableError() from None
+        self.cached = True
+        return prompt, negative_prompt, True

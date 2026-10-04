@@ -23,20 +23,28 @@ PromptCanvas/
 ├── backend/                     # API（FastAPI + Diffusers）
 │   ├── app/
 │   │   ├── main.py              # アプリ生成（ミドルウェア・起動時ロード・静的配信）
-│   │   ├── api.py               # /api のルート
-│   │   ├── error_handlers.py    # 例外 → エラー JSON への変換
 │   │   ├── config.py            # 環境変数による設定（pydantic-settings）
-│   │   ├── catalog.py           # catalog.json（選択可能なモデル・LoRA）の読み込みと検証
-│   │   ├── schemas.py           # リクエスト/レスポンス型とサーバー側入力検証
-│   │   ├── generator.py         # モデルの入れ替え・txt2img/img2img・LoRA・バッチ生成
-│   │   ├── identity.py          # 顔・ポーズの参照（InstantID + OpenPose ControlNet）
-│   │   ├── schedulers.py        # サンプラー一覧
-│   │   ├── styles.py            # スタイル（プロンプトに加える語句）
-│   │   ├── translate.py         # 日本語プロンプトの英訳（ローカル LLM）
-│   │   ├── imaging.py           # アップロード画像のデコード、PNG/JPEG/WebP エンコード
-│   │   ├── model_cache.py       # モデルがダウンロード済みかの判定
-│   │   ├── limiter.py           # 同時実行数と待ち行列の制御
-│   │   └── errors.py            # ユーザー向けエラーと例外の分類
+│   │   ├── catalog.py           # catalog.json（モデル・LoRA・プリセット等）の読み込みと検証
+│   │   ├── errors.py            # ユーザー向けエラーと例外の分類
+│   │   ├── api/                 # HTTP 層
+│   │   │   ├── routes.py        # /api のルート
+│   │   │   ├── schemas.py       # リクエスト/レスポンス型（OpenAPI にも使用）
+│   │   │   ├── validation.py    # サーバー側入力検証（リクエスト → 生成パラメータ）
+│   │   │   ├── error_handlers.py # 例外 → エラー JSON への変換
+│   │   │   ├── limiter.py       # 同時実行数と待ち行列の制御
+│   │   │   └── jobs.py          # 生成の中止
+│   │   └── generation/          # 生成エンジン（torch / diffusers は遅延 import）
+│   │       ├── generator.py     # 1 リクエストの流れ（翻訳 → モデル → パイプライン選択 → 生成 → エンコード）
+│   │       ├── models.py        # モデルの読み込み・切り替え、VAE、テキストエンコーダの退避、LoRA
+│   │       ├── runtime.py       # torch・デバイス・dtype、VRAM の計測と解放
+│   │       ├── reference.py     # 顔・ポーズ参照のパイプライン組み立て（InstantID アダプタ・ControlNet）
+│   │       ├── identity.py      # 顔検出・顔特徴量・ポーズ検出・線画抽出（InstantID + OpenPose / Scribble）
+│   │       ├── translate.py     # 日本語プロンプトの英訳（ローカル LLM）
+│   │       ├── params.py        # 生成パラメータの型と値の範囲
+│   │       ├── schedulers.py    # サンプラー一覧
+│   │       ├── styles.py        # スタイル（プロンプトに加える語句）
+│   │       ├── imaging.py       # アップロード画像のデコード、PNG/JPEG/WebP エンコード
+│   │       └── model_cache.py   # モデルがダウンロード済みかの判定
 │   ├── catalog.json             # 選択可能なモデルと LoRA の許可リスト
 │   ├── scripts/download_model.py
 │   ├── tests/                   # pytest（GPU・torch 不要）

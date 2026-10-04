@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .errors import AppError, FieldError, HttpError, InvalidInputError
+from ..errors import AppError, FieldError, HttpError, InvalidInputError
 from .schemas import ErrorDetail, ErrorResponse, FieldErrorModel
 
 logger = logging.getLogger("promptcanvas")

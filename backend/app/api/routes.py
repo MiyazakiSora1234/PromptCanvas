@@ -10,11 +10,11 @@ from typing import Annotated, Any, cast
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Path, Request, Response
 
-from .catalog import Catalog
-from .config import Settings
+from ..catalog import Catalog
+from ..config import Settings
+from ..errors import GenerationCancelledError, classify_generation_error
+from ..generation.generator import ImageGenerator
 from .error_handlers import request_id
-from .errors import GenerationCancelledError, classify_generation_error
-from .generator import ImageGenerator
 from .jobs import CancelRegistry
 from .limiter import ConcurrencyLimiter
 from .schemas import (
@@ -27,8 +27,8 @@ from .schemas import (
     GenerateResponse,
     HealthResponse,
     QueueInfo,
-    build_params,
 )
+from .validation import build_params
 
 logger = logging.getLogger("promptcanvas")
 

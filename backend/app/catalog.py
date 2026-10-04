@@ -13,8 +13,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .config import SIZE_MULTIPLE, Settings
-from .schedulers import SCHEDULERS
-from .styles import STYLES
+from .generation.schedulers import SCHEDULERS
+from .generation.styles import STYLES
 
 _ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
 
