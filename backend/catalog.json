@@ -73,6 +73,206 @@
         "identity_strength": 0.8,
         "pose_strength": 0.9
       }
+    },
+    {
+      "id": "portrait-square",
+      "label": "顔アップのポートレート",
+      "description": "RealVisXL + 写実スタイルの正方形。顔・肩までのアップ、SNS のアイコン向け。",
+      "settings": {
+        "model": "realvis-xl",
+        "style": "photo",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 1024,
+        "height": 1024,
+        "num_inference_steps": 30,
+        "guidance_scale": 3.5,
+        "negative_prompt": "deformed, disfigured, cross-eyed, asymmetrical eyes, bad teeth, blurry",
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "cinematic-wide",
+      "label": "映画のワンシーン（横長）",
+      "description": "RealVisXL + シネマ調の横長 1344×768。光と影のドラマチックな場面向け。",
+      "settings": {
+        "model": "realvis-xl",
+        "style": "cinematic",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 1344,
+        "height": 768,
+        "num_inference_steps": 30,
+        "guidance_scale": 4,
+        "negative_prompt": "deformed, bad anatomy, cartoon, illustration",
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "landscape-photo",
+      "label": "風景写真（横長）",
+      "description": "SDXL の横長 1216×832。景色・街並み・自然の写真向け（人物なし）。",
+      "settings": {
+        "model": "sdxl",
+        "style": "none",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 1216,
+        "height": 832,
+        "num_inference_steps": 30,
+        "guidance_scale": 6,
+        "negative_prompt": "people, person, text, watermark, oversaturated, blurry",
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "anime-character",
+      "label": "アニメキャラ（縦長）",
+      "description": "Animagine XL の縦長 832×1216。タグ形式のプロンプト（例: 1girl, smile, school uniform）が得意。",
+      "settings": {
+        "model": "animagine-xl",
+        "style": "none",
+        "scheduler": "euler_a",
+        "width": 832,
+        "height": 1216,
+        "num_inference_steps": 28,
+        "guidance_scale": 5,
+        "negative_prompt": "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, jpeg artifacts, signature, watermark, username, blurry",
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "fantasy-art",
+      "label": "ファンタジー背景",
+      "description": "SDXL + ファンタジー画風の横長。城・森・空想の風景などのコンセプトアート向け。",
+      "settings": {
+        "model": "sdxl",
+        "style": "fantasy",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 1344,
+        "height": 768,
+        "num_inference_steps": 30,
+        "guidance_scale": 7,
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "watercolor",
+      "label": "水彩画",
+      "description": "SDXL + 水彩スタイル。やわらかい淡い色の絵本・ポストカード風。",
+      "settings": {
+        "model": "sdxl",
+        "style": "watercolor",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 1024,
+        "height": 1024,
+        "num_inference_steps": 30,
+        "guidance_scale": 6,
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "oil-painting",
+      "label": "油絵（縦長）",
+      "description": "SDXL + 油絵スタイルの縦長 896×1152。肖像画・静物画のような絵画調。",
+      "settings": {
+        "model": "sdxl",
+        "style": "oil",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 896,
+        "height": 1152,
+        "num_inference_steps": 30,
+        "guidance_scale": 6,
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "3d-figure",
+      "label": "3D キャラ・フィギュア",
+      "description": "SDXL + 3D レンダー調。かわいいキャラクターや小物、フィギュア風の画像向け。",
+      "settings": {
+        "model": "sdxl",
+        "style": "3d",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 1024,
+        "height": 1024,
+        "num_inference_steps": 30,
+        "guidance_scale": 6,
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "pixel-game",
+      "label": "ドット絵（レトロゲーム風）",
+      "description": "SDXL + ドット絵スタイル + Pixel Art XL LoRA。ゲームのキャラ・背景風。",
+      "settings": {
+        "model": "sdxl",
+        "style": "pixel",
+        "scheduler": "euler_a",
+        "width": 1024,
+        "height": 1024,
+        "num_inference_steps": 25,
+        "guidance_scale": 6,
+        "loras": [{ "id": "pixel-art-xl", "scale": 1.0 }],
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "monochrome-photo",
+      "label": "モノクロ写真",
+      "description": "RealVisXL + 白黒写真スタイル。コントラストの強いアート写真風。",
+      "settings": {
+        "model": "realvis-xl",
+        "style": "monochrome",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 896,
+        "height": 1152,
+        "num_inference_steps": 30,
+        "guidance_scale": 4,
+        "negative_prompt": "color, deformed, blurry",
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "pencil-sketch",
+      "label": "鉛筆デッサン",
+      "description": "SDXL + 鉛筆スケッチスタイル。白黒の線画・デッサン風。",
+      "settings": {
+        "model": "sdxl",
+        "style": "sketch",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 1024,
+        "height": 1024,
+        "num_inference_steps": 30,
+        "guidance_scale": 6,
+        "negative_prompt": "color",
+        "num_images": 1,
+        "output_format": "png"
+      }
+    },
+    {
+      "id": "quick-draft",
+      "label": "お試し（高速・4枚）",
+      "description": "SD 1.5 で 512×512 を 4 枚、20 ステップ。プロンプトの当たりを素早く見る用。",
+      "settings": {
+        "model": "sd15",
+        "style": "none",
+        "scheduler": "dpmpp_2m_karras",
+        "width": 512,
+        "height": 512,
+        "num_inference_steps": 20,
+        "guidance_scale": 7,
+        "num_images": 4,
+        "output_format": "jpeg",
+        "quality": 85
+      }
     }
   ],
   "identity": {
