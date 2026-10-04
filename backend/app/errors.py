@@ -63,6 +63,15 @@ class ReferenceUnavailableError(AppError):
     default_message = "顔・ポーズ参照用のモデルを読み込めませんでした。サーバーのログと設定を確認してください。"
 
 
+class TranslationUnavailableError(AppError):
+    status_code = 503
+    code = "translation_unavailable"
+    default_message = (
+        "日本語のプロンプトを英語に翻訳できませんでした（翻訳モデルを読み込めません）。"
+        "英語で入力するか、サーバーのログと設定を確認してください。"
+    )
+
+
 class ServerBusyError(AppError):
     status_code = 429
     code = "server_busy"

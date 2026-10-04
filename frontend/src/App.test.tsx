@@ -95,6 +95,19 @@ describe("App", () => {
     ]);
   });
 
+  it("accepts a Japanese prompt and shows its English translation", async () => {
+    const { generateCalls } = mockServer();
+    const user = await renderReady();
+
+    await user.type(promptBox(), "夕焼けの海辺");
+    expect(screen.getByText(/日本語は英語に翻訳してから生成します/)).toHaveTextContent("約3.1GB");
+    await user.click(generateButton());
+
+    await screen.findByRole("img", { name: /生成画像/ });
+    expect(generateCalls[0]?.prompt).toBe("夕焼けの海辺"); // sent as typed; the server translates
+    expect(screen.getByText("EN(夕焼けの海辺)")).toBeInTheDocument();
+  });
+
   it("stops a running generation", async () => {
     let finish: (res: Response) => void = () => {};
     const { cancelCalls } = mockServer({ generate: () => new Promise<Response>((resolve) => (finish = resolve)) });

@@ -35,6 +35,7 @@ export default function App() {
           loadedModel={loadedModel(status)}
           cachedModels={cachedModels(status)}
           identityCached={status.kind === "online" ? status.health.identity_cached : null}
+          translatorCached={status.kind === "online" ? status.health.translator_cached : null}
           onRecheckHealth={refresh}
         />
       ) : (

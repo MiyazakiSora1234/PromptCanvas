@@ -32,6 +32,8 @@ interface WorkspaceProps {
   cachedModels: string[] | null;
   /** Face/pose reference assets downloaded; null while unknown. */
   identityCached: boolean | null;
+  /** Japanese prompt translator downloaded; null while unknown. */
+  translatorCached: boolean | null;
   /** Ask the parent to re-check /api/health (e.g. after a "model loading" error or a model switch). */
   onRecheckHealth: () => void;
 }
@@ -52,6 +54,7 @@ export function Workspace({
   loadedModel,
   cachedModels,
   identityCached,
+  translatorCached,
   onRecheckHealth,
 }: WorkspaceProps) {
   const [form, setForm] = useState<FormState>(() => initialFormState(config));
@@ -272,6 +275,7 @@ export function Workspace({
         onPoseFile={(file) => void pickImage("poseImage", "pose_image", file)}
         onClearPose={() => clearImage("poseImage", ["pose_image", "pose_strength"])}
         identityCached={identityCached}
+        translatorCached={translatorCached}
         presets={presets}
         onApplyPreset={handleApplyPreset}
         onSavePreset={handleSavePreset}

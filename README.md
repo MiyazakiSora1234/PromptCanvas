@@ -14,6 +14,7 @@ Hugging Face Diffusers を使った画像生成 Web アプリです。ブラウ�
 | 画像形式 | PNG / JPEG / WebP（JPEG・WebP は画質を指定可） |
 | img2img | 画像をアップロードし、変換強度を指定して描き直し。出力サイズは元画像の縦横比に自動調整 |
 | LoRA | `catalog.json` に登録した LoRA を強さ付きで適用。モデルの系統（SD1.5 / SDXL）が合うものだけ選択可 |
+| 日本語プロンプト | 日本語で入力すると、ローカルの小型 LLM（Qwen2.5-1.5B-Instruct）で英語に翻訳してから生成。英語・タグ・`(語:1.2)` の重みはそのまま。訳は結果欄に表示 |
 | 顔・ポーズの参照 | 顔の写真の人物のまま、服装・場面をプロンプトで変える（InstantID、同じ人の写真を最大 5 枚まで）。ポーズ参考画像と同じ姿勢にする（OpenPose ControlNet）。SDXL 系のみ |
 
 ```
@@ -31,6 +32,7 @@ PromptCanvas/
 │   │   ├── identity.py          # 顔・ポーズの参照（InstantID + OpenPose ControlNet）
 │   │   ├── schedulers.py        # サンプラー一覧
 │   │   ├── styles.py            # スタイル（プロンプトに加える語句）
+│   │   ├── translate.py         # 日本語プロンプトの英訳（ローカル LLM）
 │   │   ├── imaging.py           # アップロード画像のデコード、PNG/JPEG/WebP エンコード
 │   │   ├── model_cache.py       # モデルがダウンロード済みかの判定
 │   │   ├── limiter.py           # 同時実行数と待ち行列の制御
@@ -284,6 +286,22 @@ cd backend; .venv\Scripts\python.exe -m scripts.download_model sdxl pixel-art-xl
 - キャッシュ先は `HF_HOME` で変更できます。オフライン運用では取得後に `HF_HUB_OFFLINE=1` を設定してください。
 - モデルのライセンス（例: CreativeML Open RAIL-M）を確認のうえ利用してください。
 
+## 日本語プロンプト（自動英訳）
+
+Stable Diffusion のテキストエンコーダは英語しか理解しないため、日本語を含むプロンプト（ネガティブプロンプトも）は生成前にローカルの LLM で英語に翻訳します。プロンプトは外部に送られません。
+
+- 翻訳するのはカンマ（`,` `、`）で区切った部分のうち日本語を含むところだけです。英語の語句・タグ（`1girl`）・重み付き（`(笑顔:1.2)` → `(smile:1.2)`）はそのまま残します。スタイルの語句は翻訳の後に加えます。
+- 英訳は結果欄の「英訳」「ネガティブ英訳」に表示されます（API では `translated_prompt` / `translated_negative_prompt`）。思った訳にならないときは英語で直接書いてください。
+- モデルは `catalog.json` の `translator`（既定 `Qwen/Qwen2.5-1.5B-Instruct`、Apache-2.0、約 3.1GB、revision 固定）。普段は CPU メモリに置き、翻訳するときだけ GPU に載せます（1 回 1〜2 秒）。初回の日本語プロンプトでダウンロードされます（事前に取るなら `make download-model` または `python -m scripts.download_model translator`）。`translator` を消すと翻訳しません。
+- 翻訳モデルの選定（実測）：
+  | モデル | 結果 |
+  | --- | --- |
+  | 翻訳専用（FuguMT / Opus-MT ja-en） | FuguMT は意味不明な出力、Opus-MT は会話調の文（"I'm going to show you…"）やネガティブの崩れが多く不採用 |
+  | Qwen2.5-0.5B-Instruct | 日本語のまま・中国語になるなど不安定 |
+  | **Qwen2.5-1.5B-Instruct** | 自然で画像プロンプト向きの英語。例文（ワンピース→dress、透かし→watermark など）を添え、語句ごとに訳すことで誤訳と付け足しを抑えた |
+  | Qwen3-1.7B | 同じ語を繰り返し続けることがあった |
+  CPU だけで動かすと 1 語句 1〜7 秒かかるため、GPU を一時的に使う方式にしています。
+
 ## 顔・ポーズの参照（InstantID + OpenPose）
 
 「顔は元画像の人物のまま、ポーズや服装を変える」機能です。SDXL 系モデル（SDXL / Animagine XL）で使えます。
@@ -401,6 +419,7 @@ $r = Invoke-RestMethod http://127.0.0.1:8000/api/generate -Method Post -ContentT
 | `model_unavailable` | 503 | モデル読み込みに失敗（理由を `message` に表示）。次のリクエストで再試行される |
 | `lora_unavailable` | 503 | LoRA の読み込みに失敗 |
 | `reference_unavailable` | 503 | 顔・ポーズ参照用のモデルの読み込みに失敗 |
+| `translation_unavailable` | 503 | 日本語プロンプトの翻訳モデルの読み込みに失敗 |
 | `gpu_out_of_memory` | 503 | GPU メモリ不足（サイズ・ステップを下げるよう案内） |
 | `queue_timeout` | 503 | 待機時間の上限超過 |
 | `generation_failed` | 500 | その他の生成失敗 |

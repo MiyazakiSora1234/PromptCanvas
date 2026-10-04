@@ -1,7 +1,7 @@
 // One-line explanations shown under each setting. Kept deliberately short.
 
 export const HELP = {
-  prompt: "作りたい画像の内容。英語がおすすめです。Ctrl+Enter でも生成できます。",
+  prompt: "作りたい画像の内容。日本語でも英語でもOK。Ctrl+Enter でも生成できます。",
   model: "絵柄や得意分野を決める元のモデル。",
   style: "画風の味付け。「リアルな写真」は肌の質感を出す語句を自動で足します。",
   numImages: "1回で作る枚数。多いほど時間がかかります。",

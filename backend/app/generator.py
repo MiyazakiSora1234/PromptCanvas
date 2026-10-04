@@ -30,6 +30,7 @@ from .errors import (
     ModelLoadingError,
     ModelUnavailableError,
     ReferenceUnavailableError,
+    TranslationUnavailableError,
     describe_load_error,
     is_out_of_memory,
 )
@@ -38,6 +39,8 @@ from .imaging import OUTPUT_FORMATS, encode_image, fit_to
 from .model_cache import are_files_cached, is_model_cached
 from .schedulers import build_scheduler
 from .schemas import GenerationParams
+from .styles import apply_style
+from .translate import PromptTranslator, has_japanese
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +82,9 @@ class GeneratedImage:
 class GenerationResult:
     images: list[GeneratedImage]
     filtered_count: int = 0
+    # English versions of Japanese prompts (None when nothing was translated).
+    translated_prompt: str | None = None
+    translated_negative_prompt: str | None = None
 
 
 class ImageGenerator(Protocol):
@@ -93,6 +99,11 @@ class ImageGenerator(Protocol):
     @property
     def identity_cached(self) -> bool:
         """Whether the face/pose reference assets are already on disk."""
+        ...
+
+    @property
+    def translator_cached(self) -> bool:
+        """Whether the Japanese prompt translator is already on disk."""
         ...
 
     def load(self) -> None: ...
@@ -160,6 +171,8 @@ class DiffusersGenerator:
         self._cached: frozenset[str] = frozenset()
         self._identity_cached = False
         self._identity: IdentityConditioner | None = None
+        self._translator: PromptTranslator | None = None
+        self._translator_cached = False
         self._status_lock = threading.Lock()
         # Diffusers pipelines are not thread-safe, and model switching must not overlap a run.
         self._run_lock = threading.Lock()
@@ -177,6 +190,10 @@ class DiffusersGenerator:
     @property
     def identity_cached(self) -> bool:
         return self._identity_cached
+
+    @property
+    def translator_cached(self) -> bool:
+        return self._translator_cached
 
     def _set_status(self, state: ModelState, model: str | None, message: str | None = None) -> None:
         with self._status_lock:
@@ -198,6 +215,8 @@ class DiffusersGenerator:
         logger.info("Models available offline: %s", ", ".join(sorted(cached)) or "none")
         if self._catalog.identity is not None:
             self._identity_cached = are_files_cached(self._catalog.identity.files())
+        if self._catalog.translator is not None:
+            self._translator_cached = are_files_cached(self._catalog.translator.files())
         # A failure is already logged and reflected in status.
         with self._run_lock, contextlib.suppress(ModelUnavailableError):
             self._ensure_model(self._catalog.default)
@@ -435,6 +454,8 @@ class DiffusersGenerator:
                 len(params.face_images),
                 params.pose_image is not None,
             )
+            prompt, negative_prompt, translated = self._translate(params)
+            styled_prompt, styled_negative = apply_style(params.style, prompt, negative_prompt)
             loaded = self._ensure_model(params.model)
             self._apply_loras(loaded, params.loras)
             self._sync_ip_adapter(loaded, needed=bool(params.face_images))
@@ -455,14 +476,14 @@ class DiffusersGenerator:
             # CPU generators give the same image for the same seed regardless of device.
             generators = [torch.Generator(device="cpu").manual_seed(s) for s in seeds]
             kwargs: dict[str, Any] = {
-                "prompt": params.prompt,
+                "prompt": styled_prompt,
                 "num_inference_steps": params.num_inference_steps,
                 "guidance_scale": params.guidance_scale,
                 "num_images_per_prompt": params.num_images,
                 "generator": generators,
             }
-            if params.negative_prompt:
-                kwargs["negative_prompt"] = params.negative_prompt
+            if styled_negative:
+                kwargs["negative_prompt"] = styled_negative
             if params.init_image is not None:
                 kwargs["image"] = fit_to(params.init_image, params.width, params.height)
                 kwargs["strength"] = params.strength
@@ -520,7 +541,36 @@ class DiffusersGenerator:
         ]
         if not kept:
             raise ContentFilteredError()
-        return GenerationResult(images=kept, filtered_count=len(images) - len(kept))
+        return GenerationResult(
+            images=kept,
+            filtered_count=len(images) - len(kept),
+            translated_prompt=prompt if translated else None,
+            translated_negative_prompt=negative_prompt if translated and params.negative_prompt else None,
+        )
+
+    # --- Japanese prompts ------------------------------------------------------
+
+    def _translate(self, params: GenerationParams) -> tuple[str, str, bool]:
+        """(prompt, negative prompt, whether anything was translated). Caller holds _run_lock."""
+        config = self._catalog.translator
+        if config is None or not (has_japanese(params.prompt) or has_japanese(params.negative_prompt)):
+            return params.prompt, params.negative_prompt, False
+        self._init_runtime()
+        if self._translator is None:
+            token = self._settings.hf_token.get_secret_value() if self._settings.hf_token else None
+            dtype = getattr(self._torch, str(self._dtype_name))
+            self._translator = PromptTranslator(config, str(self._device), dtype, token)
+        try:
+            prompt = self._translator.translate(params.prompt)
+            negative_prompt = self._translator.translate(params.negative_prompt)
+        except Exception as exc:
+            if is_out_of_memory(exc):
+                self._release_gpu_memory()
+                raise
+            logger.exception("Failed to translate the prompt. %s", describe_load_error(exc))
+            raise TranslationUnavailableError() from None
+        self._translator_cached = True
+        return prompt, negative_prompt, True
 
     def _park_identity(self) -> None:
         if self._identity is not None:

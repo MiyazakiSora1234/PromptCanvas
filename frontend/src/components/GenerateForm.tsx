@@ -3,6 +3,7 @@ import type { AppConfig } from "../api/types";
 import type { PresetStore } from "../hooks/usePresets";
 import { TAB_LABELS, TAB_ORDER, tabsWithErrors, type TabId } from "../lib/formTabs";
 import { HELP } from "../lib/help";
+import { hasJapanese } from "../lib/japanese";
 import {
   compatibleLoras,
   findModel,
@@ -43,6 +44,7 @@ interface GenerateFormProps {
   onClearPose: () => void;
   /** Face/pose assets downloaded; null while unknown. */
   identityCached: boolean | null;
+  translatorCached: boolean | null;
   presets: PresetStore;
   onApplyPreset: (id: string) => string;
   onSavePreset: (name: string, includePrompt: boolean) => string;
@@ -77,6 +79,7 @@ export function GenerateForm({
   onPoseFile,
   onClearPose,
   identityCached,
+  translatorCached,
   presets,
   onApplyPreset,
   onSavePreset,
@@ -162,7 +165,16 @@ export function GenerateForm({
             className={`${inputClass} resize-y`}
           />
           <div className="flex justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span>{HELP.prompt}</span>
+            <span>
+              {HELP.prompt}
+              {config.translation && hasJapanese(values.prompt) && (
+                <span className="block text-indigo-700 dark:text-indigo-300">
+                  日本語は英語に翻訳してから生成します（訳は結果に表示）。
+                  {translatorCached === false &&
+                    `初回は翻訳モデル${config.translation.download_size_gb ? `（約${config.translation.download_size_gb}GB）` : ""}をダウンロードします。`}
+                </span>
+              )}
+            </span>
             <span className={promptLength > limits.max_prompt_length ? "font-semibold text-red-600" : ""}>
               {promptLength} / {limits.max_prompt_length}
             </span>

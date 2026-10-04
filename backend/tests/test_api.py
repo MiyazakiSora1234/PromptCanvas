@@ -12,6 +12,7 @@ from PIL import Image
 
 from app.errors import ContentFilteredError, LoraUnavailableError
 from app.generator import ModelState
+from app.styles import apply_style
 
 from .conftest import CATALOG, FakeGenerator, image_data_url
 
@@ -97,12 +98,24 @@ def test_photo_style_adds_realism_wording(make_client: MakeClient) -> None:
     client = make_client(gen)
     client.post("/api/generate", json={"prompt": "a woman", "negative_prompt": "hat", "style": "photo"})
     params = gen.calls[0]
-    assert params.prompt.startswith("RAW photo, a woman, detailed skin texture")
-    assert params.negative_prompt.startswith("hat, plastic skin, airbrushed")
+    # The generator adds the style's wording (after translating Japanese prompts).
+    assert (params.prompt, params.negative_prompt, params.style) == ("a woman", "hat", "photo")
+    prompt, negative = apply_style(params.style, params.prompt, params.negative_prompt)
+    assert prompt.startswith("RAW photo, a woman, detailed skin texture")
+    assert negative.startswith("hat, plastic skin, airbrushed")
 
     client.post("/api/generate", json={"prompt": "a woman", "model": "sdxl", "style": "none"})
-    assert gen.calls[1].prompt == "a woman"
-    assert gen.calls[1].negative_prompt == ""
+    assert apply_style(gen.calls[1].style, gen.calls[1].prompt, gen.calls[1].negative_prompt) == ("a woman", "")
+
+
+def test_translated_prompts_are_returned(make_client: MakeClient) -> None:
+    client = make_client()
+    body = client.post("/api/generate", json={"prompt": "猫, 1girl", "negative_prompt": "ぼやけた"}).json()
+    assert body["translated_prompt"] == "EN(猫, 1girl)"
+    assert body["translated_negative_prompt"] == "EN(ぼやけた)"
+    english = client.post("/api/generate", json={"prompt": "a cat"}).json()
+    assert english["translated_prompt"] is None
+    assert client.get("/api/config").json()["translation"] is None  # the test catalog has no translator
 
 
 def test_generate_uses_given_parameters(make_client: MakeClient) -> None:

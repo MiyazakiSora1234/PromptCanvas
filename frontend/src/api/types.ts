@@ -11,6 +11,8 @@ export interface Health {
   cached_models: string[];
   /** Face/pose reference assets downloaded. */
   identity_cached: boolean;
+  /** Japanese prompt translator downloaded. */
+  translator_cached: boolean;
   device: string | null;
   dtype: string | null;
   message: string | null;
@@ -126,6 +128,8 @@ export interface AppConfig {
   output_formats: FormatOption[];
   /** null when the server has face/pose references disabled. */
   identity: IdentityOption | null;
+  /** null when Japanese prompts are not translated. */
+  translation: { download_size_gb: number | null } | null;
   /** Built-in presets shipped with the server. */
   presets: PresetEntry[];
   defaults: {
@@ -188,6 +192,9 @@ export interface GenerateResponse {
   output_format: OutputFormat;
   elapsed_ms: number;
   filtered_count: number;
+  /** English versions of Japanese prompts; null when nothing was translated. */
+  translated_prompt: string | null;
+  translated_negative_prompt: string | null;
 }
 
 export interface FieldErrorItem {

@@ -137,6 +137,17 @@ class IdentityConfig(BaseModel):
         return files
 
 
+class TranslatorConfig(_Asset):
+    """Local LLM that translates Japanese prompts into English (a chat model in transformers format)."""
+
+    download_size_gb: float | None = Field(default=None, gt=0)
+
+    def files(self) -> list[tuple[str, str, str | None]]:
+        names = ["config.json", "generation_config.json", "model.safetensors"]
+        names += ["tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt"]
+        return [(self.repo, name, self.revision) for name in names]
+
+
 class PresetLora(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -186,6 +197,8 @@ class Catalog(BaseModel):
     models: tuple[ModelEntry, ...] = Field(min_length=1)
     loras: tuple[LoraEntry, ...] = ()
     identity: IdentityConfig | None = None
+    # None = Japanese prompts are passed to the model untranslated.
+    translator: TranslatorConfig | None = None
     presets: tuple[PresetEntry, ...] = ()
 
     @model_validator(mode="after")

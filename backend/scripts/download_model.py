@@ -5,7 +5,7 @@ only the files the Diffusers pipelines need (not every checkpoint in each reposi
 
 Usage (from backend/):
     python -m scripts.download_model              # everything in catalog.json
-    python -m scripts.download_model sdxl pixel-art-xl identity
+    python -m scripts.download_model sdxl pixel-art-xl identity translator
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ def main() -> None:
     known = {m.id for m in catalog.models} | {lora.id for lora in catalog.loras}
     if catalog.identity is not None:
         known.add("identity")
+    if catalog.translator is not None:
+        known.add("translator")
     if unknown := wanted - known:
         parser.error(f"unknown catalog ids: {', '.join(sorted(unknown))}")
 
@@ -61,6 +63,11 @@ def main() -> None:
     if catalog.identity is not None and (not wanted or "identity" in wanted):
         print("[identity] InstantID / face models / OpenPose ...", flush=True)
         for repo, filename, revision in catalog.identity.files():
+            print(f"  -> {hf_hub_download(repo, filename, revision=revision, token=token)}", flush=True)
+
+    if catalog.translator is not None and (not wanted or "translator" in wanted):
+        print(f"[translator] {catalog.translator.repo} (Japanese prompts) ...", flush=True)
+        for repo, filename, revision in catalog.translator.files():
             print(f"  -> {hf_hub_download(repo, filename, revision=revision, token=token)}", flush=True)
 
 

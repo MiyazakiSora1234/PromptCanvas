@@ -83,6 +83,7 @@ export const CONFIG: AppConfig = {
     { id: "webp", label: "WebP", lossy: true, extension: "webp" },
   ],
   identity: { families: ["sdxl"], download_size_gb: 6.6 },
+  translation: { download_size_gb: 3.1 },
   presets: [
     {
       id: "realistic-human",
@@ -109,6 +110,7 @@ export function health(status: Health["status"] = "ready", model = "sd15"): Heal
     model,
     cached_models: ["sd15"],
     identity_cached: true,
+    translator_cached: false,
     device: "cuda",
     dtype: "float16",
     message: status === "failed" ? "モデルが見つかりません。" : null,
@@ -137,6 +139,9 @@ export function generateResponse(req: GenerateRequest, elapsedMs = 2500): Respon
     output_format: req.output_format,
     elapsed_ms: elapsedMs,
     filtered_count: 0,
+    // Stands in for the server's translation of Japanese prompts.
+    translated_prompt: /[぀-ヿ㐀-鿿]/.test(req.prompt) ? `EN(${req.prompt})` : null,
+    translated_negative_prompt: null,
   });
 }
 

@@ -17,6 +17,7 @@ from app.generator import GeneratedImage, GenerationResult, ModelState, ModelSta
 from app.imaging import OUTPUT_FORMATS, encode_image
 from app.main import create_app
 from app.schemas import GenerationParams
+from app.translate import has_japanese
 
 CATALOG = Catalog.model_validate(
     {
@@ -89,6 +90,10 @@ class FakeGenerator:
     def identity_cached(self) -> bool:
         return False
 
+    @property
+    def translator_cached(self) -> bool:
+        return False
+
     def load(self) -> None:
         pass
 
@@ -104,7 +109,14 @@ class FakeGenerator:
         data = encode_image(img, params.output_format, params.quality)
         mime = OUTPUT_FORMATS[params.output_format].mime_type
         seed = 1234 if params.seed is None else params.seed
-        return GenerationResult(images=[GeneratedImage(data, mime, s) for s in batch_seeds(seed, params.num_images)])
+        # Stands in for translation: Japanese prompts come back marked as translated.
+        translated = has_japanese(params.prompt) or has_japanese(params.negative_prompt)
+        negative = params.negative_prompt
+        return GenerationResult(
+            images=[GeneratedImage(data, mime, s) for s in batch_seeds(seed, params.num_images)],
+            translated_prompt=f"EN({params.prompt})" if translated else None,
+            translated_negative_prompt=f"EN({negative})" if translated and negative else None,
+        )
 
 
 def make_settings(**overrides: Any) -> Settings:

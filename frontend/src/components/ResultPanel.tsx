@@ -42,6 +42,8 @@ export function ResultPanel({ config, startedAt, result, onReuseSeed, children }
   if (result && selected) {
     const r = result.response;
     const label = (list: { id: string; label: string }[], id: string) => list.find((x) => x.id === id)?.label ?? id;
+    if (r.translated_prompt) meta.push(["英訳", r.translated_prompt]);
+    if (r.translated_negative_prompt) meta.push(["ネガティブ英訳", r.translated_negative_prompt]);
     meta.push(
       ["シード", String(selected.seed)],
       ["モデル", label(config.models, r.model)],

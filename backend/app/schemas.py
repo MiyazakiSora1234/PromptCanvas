@@ -14,7 +14,7 @@ from .config import SEED_MAX, SIZE_MULTIPLE, Settings
 from .errors import FieldError, InvalidInputError
 from .imaging import OUTPUT_FORMATS, ImageDecodeError, OutputFormat, decode_base64_image
 from .schedulers import SCHEDULERS
-from .styles import STYLES, apply_style
+from .styles import STYLES
 
 # Absolute caps so oversized payloads are rejected before any further work.
 _HARD_TEXT_CAP = 10_000
@@ -77,7 +77,8 @@ class GenerateRequest(BaseModel):
 
 @dataclass(frozen=True)
 class GenerationParams:
-    prompt: str  # with the style's wording applied
+    # As typed (possibly Japanese); the generator translates them and adds the style's wording.
+    prompt: str
     negative_prompt: str
     model: ModelEntry
     scheduler: str
@@ -229,10 +230,9 @@ def build_params(req: GenerateRequest, settings: Settings, catalog: Catalog) -> 
     if errors:
         raise InvalidInputError(fields=errors)
 
-    styled_prompt, styled_negative = apply_style(style, prompt, negative_prompt)
     return GenerationParams(
-        prompt=styled_prompt,
-        negative_prompt=styled_negative,
+        prompt=prompt,
+        negative_prompt=negative_prompt,
         model=model,
         scheduler=scheduler,
         style=style,
@@ -293,6 +293,8 @@ class GenerateResponse(BaseModel):
     output_format: OutputFormat
     elapsed_ms: int
     filtered_count: int = Field(description="セーフティフィルタで除外された枚数")
+    translated_prompt: str | None = Field(default=None, description="日本語を英訳したプロンプト（英訳なしは null）")
+    translated_negative_prompt: str | None = Field(default=None, description="ネガティブプロンプトの英訳")
 
 
 class CancelResponse(BaseModel):
@@ -312,6 +314,7 @@ class HealthResponse(BaseModel):
     model: str | None = Field(description="読み込み済み（または読み込み中）のモデル ID")
     cached_models: list[str] = Field(description="ダウンロード済みで、すぐ読み込めるモデル ID")
     identity_cached: bool = Field(description="顔・ポーズ参照に必要なモデルがダウンロード済みか")
+    translator_cached: bool = Field(default=False, description="日本語プロンプトの翻訳モデルがダウンロード済みか")
     device: str | None
     dtype: str | None
     message: str | None
@@ -397,6 +400,10 @@ class Defaults(BaseModel):
     pose_strength: float
 
 
+class TranslationOption(BaseModel):
+    download_size_gb: float | None
+
+
 class ConfigResponse(BaseModel):
     limits: Limits
     default_model: str
@@ -406,6 +413,7 @@ class ConfigResponse(BaseModel):
     loras: list[LoraOption]
     output_formats: list[FormatOption]
     identity: IdentityOption | None = Field(description="顔・ポーズ参照（null なら無効）")
+    translation: TranslationOption | None = Field(default=None, description="日本語の自動英訳（null なら無効）")
     presets: list[PresetEntry] = Field(description="組み込みの設定プリセット")
     defaults: Defaults
 
@@ -470,6 +478,9 @@ class ConfigResponse(BaseModel):
                 )
                 if catalog.identity
                 else None
+            ),
+            translation=(
+                TranslationOption(download_size_gb=catalog.translator.download_size_gb) if catalog.translator else None
             ),
             presets=list(catalog.presets),
             defaults=Defaults(

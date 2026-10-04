@@ -74,6 +74,7 @@ async def health(generator: GeneratorDep, limiter: LimiterDep) -> HealthResponse
         model=status.model,
         cached_models=sorted(generator.cached_models),
         identity_cached=generator.identity_cached,
+        translator_cached=generator.translator_cached,
         device=status.device,
         dtype=status.dtype,
         message=status.message,
@@ -155,4 +156,6 @@ async def generate(
         output_format=params.output_format,
         elapsed_ms=elapsed_ms,
         filtered_count=result.filtered_count,
+        translated_prompt=result.translated_prompt,
+        translated_negative_prompt=result.translated_negative_prompt,
     )
