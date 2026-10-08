@@ -40,8 +40,8 @@ interface GenerateFormProps {
   onInitImageClear: () => void;
   onFaceFiles: (files: File[]) => void;
   onRemoveFace: (index: number) => void;
-  onPoseFile: (file: File) => void;
-  onClearPose: () => void;
+  onPoseFiles: (files: File[]) => void;
+  onRemovePose: (index: number) => void;
   /** Face/pose assets downloaded; null while unknown. */
   identityCached: boolean | null;
   translatorCached: boolean | null;
@@ -76,8 +76,8 @@ export function GenerateForm({
   onInitImageClear,
   onFaceFiles,
   onRemoveFace,
-  onPoseFile,
-  onClearPose,
+  onPoseFiles,
+  onRemovePose,
   identityCached,
   translatorCached,
   presets,
@@ -123,7 +123,7 @@ export function GenerateForm({
   };
 
   const errorTabs = tabsWithErrors(fieldErrors);
-  const referenceCount = (state.initImage ? 1 : 0) + state.faceImages.length + (state.poseImage ? 1 : 0);
+  const referenceCount = (state.initImage ? 1 : 0) + state.faceImages.length + state.poseImages.length;
   const tabs: TabItem<TabId>[] = TAB_ORDER.map((id) => ({
     id,
     label: TAB_LABELS[id],
@@ -209,7 +209,7 @@ export function GenerateForm({
                 strengthError={fieldErrors.strength}
                 disabled={busy}
                 unavailableReason={
-                  state.faceImages.length > 0 || state.poseImage
+                  state.faceImages.length > 0 || state.poseImages.length > 0
                     ? "顔・ポーズの参照と同時には使えません。参照画像を外すと選べます。"
                     : undefined
                 }
@@ -227,8 +227,8 @@ export function GenerateForm({
                 disabled={busy}
                 onFaceFiles={onFaceFiles}
                 onRemoveFace={onRemoveFace}
-                onPoseFile={onPoseFile}
-                onClearPose={onClearPose}
+                onPoseFiles={onPoseFiles}
+                onRemovePose={onRemovePose}
                 onValueChange={onValueChange}
               />
             </TabPanel>

@@ -8,13 +8,16 @@ import { CONFIG, errorResponse, generateResponse, health } from "./test/fixtures
 // jsdom cannot decode images, so stub the file reader used for img2img.
 vi.mock("./lib/images", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./lib/images")>()),
-  readImageFile: vi.fn(async (file: File) => ({
-    dataUrl: "data:image/png;base64,AAAA",
-    name: file.name,
-    width: 1920,
-    height: 1080,
-    bytes: file.size,
-  })),
+  readImageFile: vi.fn(async (file: File) => {
+    const size = /(\d+)x(\d+)/.exec(file.name);
+    return {
+      dataUrl: size ? `data:image/png;base64,${size[1]}x${size[2]}` : "data:image/png;base64,AAAA",
+      name: file.name,
+      width: size ? Number(size[1]) : 1920,
+      height: size ? Number(size[2]) : 1080,
+      bytes: file.size,
+    };
+  }),
 }));
 
 type GenerateHandler = (body: GenerateRequest) => Response | Promise<Response>;
@@ -64,7 +67,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "画像を生成" }));
 
     const image = await screen.findByRole("img", { name: "生成画像: a lighthouse" });
-    expect(image).toHaveAttribute("src", "blob:mock-image");
+    expect(image.getAttribute("src")).toMatch(/^blob:mock-image-\d+$/);
     const download = screen.getByRole("link", { name: "PNGをダウンロード" });
     expect(download.getAttribute("download")).toMatch(/^promptcanvas_\d{8}T\d{6}_seed42\.png$/);
     expect(screen.getByText("2.5 秒")).toBeInTheDocument();
@@ -106,6 +109,58 @@ describe("App", () => {
     await screen.findByRole("img", { name: /生成画像/ });
     expect(generateCalls[0]?.prompt).toBe("夕焼けの海辺"); // sent as typed; the server translates
     expect(screen.getByText("EN(夕焼けの海辺)")).toBeInTheDocument();
+  });
+
+  it("makes several images one by one, continuing the seed, and offers them as one ZIP", async () => {
+    const { generateCalls } = mockServer();
+    const user = await renderReady();
+
+    await user.type(promptBox(), "a cat");
+    const count = screen.getByLabelText("枚数");
+    await user.clear(count);
+    await user.type(count, "3");
+    await openTab(user, "詳細");
+    await user.type(screen.getByLabelText("シード値"), "42");
+    expect(screen.getByLabelText("現在の設定")).toHaveTextContent("3枚");
+    await user.click(screen.getByRole("button", { name: "3枚を生成" }));
+
+    const thumbnails = await screen.findByRole("listbox", { name: "生成した画像" });
+    await waitFor(() => expect(within(thumbnails).getAllByRole("option")).toHaveLength(3));
+    // One request per image, seeds continuing from the given one.
+    expect(generateCalls.map((c) => [c.num_images, c.seed])).toEqual([
+      [1, 42],
+      [1, 43],
+      [1, 44],
+    ]);
+    // The newest image is shown; picking another shows its own seed and file name.
+    expect(within(thumbnails).getByRole("option", { name: "3枚目（シード 44）" })).toHaveAttribute("aria-selected", "true");
+    await user.click(within(thumbnails).getByRole("option", { name: "2枚目（シード 43）" }));
+    expect(screen.getByRole("link", { name: "PNGをダウンロード" }).getAttribute("download")).toMatch(/_seed43\.png$/);
+    expect(screen.getByRole("button", { name: "すべてダウンロード（ZIP・3枚）" })).toBeInTheDocument();
+  });
+
+  it("stops a series and keeps the images made so far", async () => {
+    let finishSecond: (res: Response) => void = () => {};
+    const { generateCalls, cancelCalls } = mockServer({
+      generate: (body) =>
+        generateCalls.length === 1 ? generateResponse(body) : new Promise<Response>((resolve) => (finishSecond = resolve)),
+    });
+    const user = await renderReady();
+
+    await user.type(promptBox(), "a cat");
+    const count = screen.getByLabelText("枚数");
+    await user.clear(count);
+    await user.type(count, "5");
+    await user.click(screen.getByRole("button", { name: "5枚を生成" }));
+
+    expect(await screen.findByText(/2 \/ 5 枚目/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "中止" }));
+    expect(cancelCalls).toHaveLength(1);
+    finishSecond(errorResponse(409, "cancelled", "生成を中止しました。"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("生成を中止しました。");
+    expect(generateCalls).toHaveLength(2); // nothing after the stop
+    expect(screen.getByRole("img", { name: "生成画像: a cat" })).toBeInTheDocument(); // the first image stays
   });
 
   it("stops a running generation", async () => {
@@ -243,26 +298,6 @@ describe("App", () => {
     expect(screen.getByRole("note")).toHaveTextContent("約6.9GB のダウンロード");
   });
 
-  it("generates a batch and lets the user pick which image to download", async () => {
-    const { generateCalls } = mockServer();
-    const user = await renderReady();
-
-    await user.type(promptBox(), "a cat");
-    await openTab(user, "詳細");
-    await user.type(screen.getByLabelText("シード値"), "10");
-    await openTab(user, "基本");
-    await user.click(within(screen.getByRole("radiogroup", { name: "枚数" })).getByLabelText("4"));
-    await user.click(generateButton());
-
-    const thumbnails = await screen.findByRole("listbox", { name: "生成した画像" });
-    expect(within(thumbnails).getAllByRole("option")).toHaveLength(4);
-    expect(generateCalls[0]?.num_images).toBe(4);
-
-    await user.click(screen.getByRole("option", { name: "3枚目（シード 12）" }));
-    expect(screen.getByRole("option", { name: "3枚目（シード 12）" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("link", { name: "PNGをダウンロード" }).getAttribute("download")).toMatch(/_seed12\.png$/);
-  });
-
   it("outputs JPEG with a quality setting", async () => {
     const { generateCalls } = mockServer();
     const user = await renderReady();
@@ -331,7 +366,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "顔の写真 2枚目を外す" }));
     expect(screen.queryByAltText("顔の写真 3枚目")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "顔の写真を追加（あと1枚）" })).toBeEnabled();
-    expect(screen.getByAltText("ポーズ参考画像のプレビュー")).toBeInTheDocument();
+    expect(screen.getByAltText("ポーズ参考画像 1枚目")).toBeInTheDocument();
     expect(screen.getByLabelText(/顔の再現度/)).toHaveValue("0.8");
     // img2img can't be combined with references.
     expect(screen.getByText(/顔・ポーズの参照と同時には使えません/)).toBeInTheDocument();
@@ -426,6 +461,36 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "「速い WebP」を削除" }));
     expect(await screen.findByText("「速い WebP」を削除しました。")).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "速い WebP" })).not.toBeInTheDocument();
+  });
+
+  it("makes images for each of several pose images, each in its own aspect ratio", async () => {
+    const { generateCalls } = mockServer();
+    const user = await renderReady();
+
+    await user.selectOptions(screen.getByLabelText("モデル"), "sdxl");
+    const count = screen.getByLabelText("枚数");
+    await user.clear(count);
+    await user.type(count, "2");
+    await openTab(user, "画像参照");
+    const png = (name: string) => new File(["p"], name, { type: "image/png" });
+    await user.upload(screen.getByLabelText("ポーズ参考画像ファイル"), [png("wide-1600x900.png"), png("tall-900x1600.png")]);
+    expect(await screen.findByAltText("ポーズ参考画像 2枚目")).toBeInTheDocument();
+    expect(screen.getByLabelText("現在の設定")).toHaveTextContent("ポーズ参照 2枚");
+
+    await user.type(promptBox(), "a dancer");
+    await user.click(screen.getByRole("button", { name: /2ポーズ × 2枚（計4枚）を生成$/ }));
+    const thumbnails = await screen.findByRole("listbox", { name: "生成した画像" });
+    await waitFor(() => expect(within(thumbnails).getAllByRole("option")).toHaveLength(4));
+
+    const sent = generateCalls.map((c) => [c.pose_image, c.width > c.height ? "landscape" : "portrait"]);
+    expect(sent).toEqual([
+      ["data:image/png;base64,1600x900", "landscape"],
+      ["data:image/png;base64,1600x900", "landscape"],
+      ["data:image/png;base64,900x1600", "portrait"],
+      ["data:image/png;base64,900x1600", "portrait"],
+    ]);
+    // The shown (newest) image says which pose it used.
+    expect(screen.getByText("2枚目・強さ 0.9")).toBeInTheDocument();
   });
 
   it("warns that face/pose references need a first-time download", async () => {

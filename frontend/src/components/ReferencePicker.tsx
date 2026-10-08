@@ -1,7 +1,6 @@
 import type { AppConfig } from "../api/types";
 import { HELP } from "../lib/help";
-import type { FieldErrors, FormState, FormValues } from "../lib/validation";
-import { ImagePicker } from "./ImagePicker";
+import { MAX_POSE_IMAGES, type FieldErrors, type FormState, type FormValues } from "../lib/validation";
 import { MultiImagePicker } from "./MultiImagePicker";
 import { StrengthSlider } from "./StrengthSlider";
 
@@ -17,8 +16,8 @@ interface ReferencePickerProps {
   disabled: boolean;
   onFaceFiles: (files: File[]) => void;
   onRemoveFace: (index: number) => void;
-  onPoseFile: (file: File) => void;
-  onClearPose: () => void;
+  onPoseFiles: (files: File[]) => void;
+  onRemovePose: (index: number) => void;
   onValueChange: (name: keyof FormValues, value: string) => void;
 }
 
@@ -33,13 +32,13 @@ export function ReferencePicker({
   disabled,
   onFaceFiles,
   onRemoveFace,
-  onPoseFile,
-  onClearPose,
+  onPoseFiles,
+  onRemovePose,
   onValueChange,
 }: ReferencePickerProps) {
   if (!config.identity) return null;
   const { limits } = config;
-  const inUse = state.faceImages.length > 0 || state.poseImage !== null;
+  const inUse = state.faceImages.length > 0 || state.poseImages.length > 0;
 
   return (
     <fieldset className="flex flex-col gap-3 rounded-md border border-slate-200 p-3 dark:border-slate-700">
@@ -97,18 +96,19 @@ export function ReferencePicker({
               {HELP.poseImage}
               {state.faceImages.length > 0 ? "顔が写っていれば、顔の位置もこの人物に合わせます。" : ""}
             </p>
-            <ImagePicker
+            <MultiImagePicker
               id="pose_image"
               label="ポーズ参考画像"
-              image={state.poseImage}
+              images={state.poseImages}
+              max={MAX_POSE_IMAGES}
               maxMb={limits.max_init_image_mb}
               error={fieldErrors.pose_image}
               disabled={disabled}
-              onFile={onPoseFile}
-              onClear={onClearPose}
+              onFiles={onPoseFiles}
+              onRemove={onRemovePose}
             />
           </div>
-          {state.poseImage && (
+          {state.poseImages.length > 0 && (
             <StrengthSlider
               id="pose_strength"
               label="ポーズの強さ"

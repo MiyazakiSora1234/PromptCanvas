@@ -3,10 +3,12 @@ import type { AppConfig } from "../api/types";
 import { useImageGeneration } from "../hooks/useImageGeneration";
 import { usePresets } from "../hooks/usePresets";
 import { applyPreset, captureSettings } from "../lib/presets";
+import { buildSeries } from "../lib/series";
 import { ImageFileError, readImageFile, sizeForAspect } from "../lib/images";
 import { presentError } from "../lib/presentError";
 import { firstErrorTab, type TabId } from "../lib/formTabs";
 import {
+  MAX_POSE_IMAGES,
   findModel,
   initialFormState,
   modelDefaultValues,
@@ -60,7 +62,7 @@ export function Workspace({
   const [message, setMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("basic");
   const [focusRequest, setFocusRequest] = useState(0);
-  const { busy, startedAt, result, generate, cancel, cancelling } = useImageGeneration();
+  const { busy, progress, result, generate, cancel, cancelling } = useImageGeneration();
   const presets = usePresets(config);
 
   /** Show a message and field errors, switching to the tab that holds the first one. */
@@ -80,9 +82,9 @@ export function Workspace({
    * Output size: the aspect ratio of the image that defines the composition (img2img source,
    * else pose reference, else first face photo) at the model's native pixel count; otherwise model defaults.
    */
-  const sizeFor = (state: Pick<FormState, "initImage" | "poseImage" | "faceImages">, modelId: string) => {
+  const sizeFor = (state: Pick<FormState, "initImage" | "poseImages" | "faceImages">, modelId: string) => {
     const model = findModel(config, modelId);
-    const layout = state.initImage ?? state.poseImage ?? state.faceImages[0];
+    const layout = state.initImage ?? state.poseImages[0] ?? state.faceImages[0];
     const size = layout
       ? sizeForAspect(layout.width, layout.height, model.defaults, config.limits)
       : { width: model.defaults.width, height: model.defaults.height };
@@ -94,7 +96,7 @@ export function Workspace({
     setForm((prev) => {
       // Face/pose references only work with some model families (InstantID is SDXL-only).
       const keepRefs = supportsReference(config, model);
-      const next = { ...prev, faceImages: keepRefs ? prev.faceImages : [], poseImage: keepRefs ? prev.poseImage : null };
+      const next = { ...prev, faceImages: keepRefs ? prev.faceImages : [], poseImages: keepRefs ? prev.poseImages : [] };
       return {
         ...next,
         // Each model has its own native size, step count, guidance and recommended sampler.
@@ -119,33 +121,32 @@ export function Workspace({
     );
   };
 
-  /** Read a picked file into one of the image slots and resize the output to fit it. */
-  const pickImage = async (slot: "initImage" | "poseImage", field: string, file: File) => {
+  /** Read the img2img source and resize the output to fit it. */
+  const pickInitImage = async (file: File) => {
     try {
       const image = await readImageFile(file, config.limits.max_init_image_mb);
       setForm((prev) => {
-        const next = { ...prev, [slot]: image };
+        const next = { ...prev, initImage: image };
         return { ...next, values: { ...prev.values, ...sizeFor(next, prev.values.model) } };
       });
-      setFieldErrors((prev) => withoutKeys(prev, [field, "width", "height"]));
+      setFieldErrors((prev) => withoutKeys(prev, ["init_image", "width", "height"]));
     } catch (err) {
       const text = err instanceof ImageFileError ? err.message : "画像を読み込めませんでした。";
-      setFieldErrors((prev) => ({ ...prev, [field]: text }));
+      setFieldErrors((prev) => ({ ...prev, init_image: text }));
     }
   };
 
-  const clearImage = (slot: "initImage" | "poseImage", fields: string[]) => {
+  const clearInitImage = () => {
     setForm((prev) => {
-      const next = { ...prev, [slot]: null };
+      const next = { ...prev, initImage: null };
       return { ...next, values: { ...prev.values, ...sizeFor(next, prev.values.model) } };
     });
-    setFieldErrors((prev) => withoutKeys(prev, fields));
+    setFieldErrors((prev) => withoutKeys(prev, ["init_image", "strength"]));
   };
 
-  /** Add face photos (of the same person), up to the server's limit. */
-  const addFaces = async (files: File[]) => {
-    const max = config.limits.max_face_images;
-    const room = max - form.faceImages.length;
+  /** Add face photos (of one person) or pose images, up to `max`; the output size follows the first. */
+  const addImages = async (slot: "faceImages" | "poseImages", field: string, label: string, max: number, files: File[]) => {
+    const room = max - form[slot].length;
     const accepted = files.slice(0, Math.max(0, room));
     const results = await Promise.allSettled(
       accepted.map((file) => readImageFile(file, config.limits.max_init_image_mb)),
@@ -156,26 +157,26 @@ export function Workspace({
         ? [`${accepted[i]!.name}: ${r.reason instanceof ImageFileError ? r.reason.message : "読み込めませんでした。"}`]
         : [],
     );
-    if (files.length > accepted.length) problems.push(`顔の写真は${max}枚までです。超えた分は追加していません。`);
+    if (files.length > accepted.length) problems.push(`${label}は${max}枚までです。超えた分は追加していません。`);
 
     if (images.length > 0) {
       setForm((prev) => {
-        const next = { ...prev, faceImages: [...prev.faceImages, ...images].slice(0, max) };
+        const next = { ...prev, [slot]: [...prev[slot], ...images].slice(0, max) };
         return { ...next, values: { ...prev.values, ...sizeFor(next, prev.values.model) } };
       });
     }
     setFieldErrors((prev) => {
-      const cleared = withoutKeys(prev, ["face_images", "width", "height"]);
-      return problems.length > 0 ? { ...cleared, face_images: problems.join(" ") } : cleared;
+      const cleared = withoutKeys(prev, [field, "width", "height", "num_images"]);
+      return problems.length > 0 ? { ...cleared, [field]: problems.join(" ") } : cleared;
     });
   };
 
-  const removeFace = (index: number) => {
+  const removeImage = (slot: "faceImages" | "poseImages", fields: string[], index: number) => {
     setForm((prev) => {
-      const next = { ...prev, faceImages: prev.faceImages.filter((_, i) => i !== index) };
+      const next = { ...prev, [slot]: prev[slot].filter((_, i) => i !== index) };
       return { ...next, values: { ...prev.values, ...sizeFor(next, prev.values.model) } };
     });
-    setFieldErrors((prev) => withoutKeys(prev, ["face_images", "identity_strength"]));
+    setFieldErrors((prev) => withoutKeys(prev, [...fields, "num_images"]));
   };
 
   const handleApplyPreset = (id: string): string => {
@@ -186,7 +187,7 @@ export function Workspace({
     let next = applied.state;
     const notes = [...applied.warnings];
     // With a reference / img2img image, the output keeps that image's aspect ratio.
-    if (next.initImage ?? next.poseImage ?? next.faceImages[0]) {
+    if (next.initImage ?? next.poseImages[0] ?? next.faceImages[0]) {
       next = { ...next, values: { ...next.values, ...sizeFor(next, next.values.model) } };
       notes.push("出力サイズは選択中の画像の縦横比に合わせました。");
     }
@@ -207,7 +208,6 @@ export function Workspace({
     setFieldErrors((prev) => withoutKeys(prev, ["loras"]));
   };
 
-
   const handleSubmit = async () => {
     if (busy) return;
     setMessage(null);
@@ -224,7 +224,7 @@ export function Workspace({
     if (switching) window.setTimeout(onRecheckHealth, 500);
 
     try {
-      await generate(validation.payload);
+      await generate(buildSeries(validation.payload, validation.count, form.poseImages, config.limits));
       if (switching) onRecheckHealth();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -243,17 +243,25 @@ export function Workspace({
   };
 
   const switchingModel = loadedModel !== null && form.values.model !== loadedModel;
+  const count = Number(form.values.num_images);
+  const poses = form.poseImages.length;
+  const action =
+    poses > 1 && Number.isInteger(count)
+      ? `${poses}ポーズ × ${count}枚（計${poses * count}枚）を生成`
+      : Number.isInteger(count) && count > 1
+        ? `${count}枚を生成`
+        : "画像を生成";
   const submitLabel = busy
     ? cancelling
       ? "中止しています…"
       : modelLoading
-      ? "モデルを読み込み中…"
-      : "生成中…"
+        ? "モデルを読み込み中…"
+        : "生成中…"
     : modelLoading
       ? "モデル準備中…"
       : switchingModel
-        ? "モデルを切り替えて生成"
-        : "画像を生成";
+        ? `モデルを切り替えて${action.replace("画像を", "")}`
+        : action;
 
   return (
     <main className="mx-auto grid max-w-6xl grid-cols-1 items-start gap-4 px-4 pb-8 md:grid-cols-[minmax(0,440px)_minmax(0,1fr)]">
@@ -266,12 +274,12 @@ export function Workspace({
         onValueChange={handleValueChange}
         onModelChange={handleModelChange}
         onLorasChange={handleLorasChange}
-        onInitImageFile={(file) => void pickImage("initImage", "init_image", file)}
-        onInitImageClear={() => clearImage("initImage", ["init_image", "strength"])}
-        onFaceFiles={(files) => void addFaces(files)}
-        onRemoveFace={removeFace}
-        onPoseFile={(file) => void pickImage("poseImage", "pose_image", file)}
-        onClearPose={() => clearImage("poseImage", ["pose_image", "pose_strength"])}
+        onInitImageFile={(file) => void pickInitImage(file)}
+        onInitImageClear={clearInitImage}
+        onFaceFiles={(files) => void addImages("faceImages", "face_images", "顔の写真", config.limits.max_face_images, files)}
+        onRemoveFace={(i) => removeImage("faceImages", ["face_images", "identity_strength"], i)}
+        onPoseFiles={(files) => void addImages("poseImages", "pose_image", "ポーズ参考画像", MAX_POSE_IMAGES, files)}
+        onRemovePose={(i) => removeImage("poseImages", ["pose_image", "pose_strength"], i)}
         identityCached={identityCached}
         translatorCached={translatorCached}
         presets={presets}
@@ -286,7 +294,7 @@ export function Workspace({
       />
       {/* The result with the generate button right under the image; stays in view while settings scroll. */}
       <div className="min-w-0 md:sticky md:top-4">
-        <ResultPanel config={config} startedAt={startedAt} result={result} onReuseSeed={handleReuseSeed}>
+        <ResultPanel config={config} progress={progress} result={result} onReuseSeed={handleReuseSeed}>
           <GeneratePanel
             config={config}
             state={form}

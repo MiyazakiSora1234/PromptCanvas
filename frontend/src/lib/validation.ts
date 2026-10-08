@@ -33,6 +33,12 @@ export const FIELD_NAMES = [
 
 export type FieldName = (typeof FIELD_NAMES)[number];
 
+/** Most images one click makes. They are generated one by one (one request each). */
+export const MAX_IMAGES = 100;
+
+/** Pose reference images one click can use. */
+export const MAX_POSE_IMAGES = 10;
+
 /** Raw input strings, as typed by the user. */
 export type FormValues = Record<Exclude<FieldName, "init_image" | "face_images" | "pose_image" | "loras">, string>;
 
@@ -47,8 +53,8 @@ export interface FormState {
   initImage: PickedImage | null;
   /** Photos of the person whose face to keep (InstantID); averaged on the server. */
   faceImages: PickedImage[];
-  /** Pose to copy (OpenPose ControlNet). */
-  poseImage: PickedImage | null;
+  /** Poses to copy; each gets its own images (see buildSeries). */
+  poseImages: PickedImage[];
 }
 
 /** Whether the face/pose reference feature can be used with this model. */
@@ -59,7 +65,7 @@ export function supportsReference(config: AppConfig, model: ModelOption): boolea
 /** Keyed by field name; may also contain server-side names such as "body". */
 export type FieldErrors = Partial<Record<string, string>>;
 
-type ValidationResult = { ok: true; payload: GenerateRequest } | { ok: false; errors: FieldErrors };
+type ValidationResult = { ok: true; payload: GenerateRequest; count: number } | { ok: false; errors: FieldErrors };
 
 export function findModel(config: AppConfig, id: string): ModelOption {
   return config.models.find((m) => m.id === id) ?? config.models[0]!;
@@ -102,7 +108,7 @@ export function initialFormState(config: AppConfig): FormState {
     loras: [],
     initImage: null,
     faceImages: [],
-    poseImage: null,
+    poseImages: [],
   };
 }
 
@@ -166,8 +172,10 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
   }
 
   const numImages = parseInteger(values.num_images);
-  if (numImages === null || numImages < 1 || numImages > limits.max_batch_size)
-    errors.num_images = `1〜${limits.max_batch_size}枚の範囲で指定してください。`;
+  if (numImages === null || numImages < 1 || numImages > MAX_IMAGES)
+    errors.num_images = `1〜${MAX_IMAGES}枚の範囲で指定してください。`;
+  else if (numImages * Math.max(1, state.poseImages.length) > MAX_IMAGES)
+    errors.num_images = `ポーズ${state.poseImages.length}枚 × 枚数で、合計${MAX_IMAGES}枚までにしてください。`;
 
   const format = config.output_formats.find((f) => f.id === values.output_format);
   if (!format) errors.output_format = "画像形式を選んでください。";
@@ -184,22 +192,24 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
       errors.strength = "ステップ数 × 変換強度が 1 以上になるようにしてください。";
   }
 
-  const { faceImages, poseImage } = state;
+  const { faceImages, poseImages } = state;
   const hasFaces = faceImages.length > 0;
+  const hasPoses = poseImages.length > 0;
   const identityStrength = parseNumber(values.identity_strength);
   const poseStrength = parseNumber(values.pose_strength);
-  if (hasFaces || poseImage) {
+  if (hasFaces || hasPoses) {
     const field = hasFaces ? "face_images" : "pose_image";
     if (model && !supportsReference(config, model))
       errors[field] = `顔・ポーズの参照は SDXL 系のモデルでのみ使えます（選択中: ${model.label}）。`;
     if (initImage) errors[field] = "img2img（元画像から生成）と顔・ポーズの参照は同時に使えません。どちらかを外してください。";
     if (faceImages.length > limits.max_face_images)
       errors.face_images = `顔の写真は${limits.max_face_images}枚まで選べます。`;
+    if (poseImages.length > MAX_POSE_IMAGES) errors.pose_image = `ポーズ参考画像は${MAX_POSE_IMAGES}枚まで選べます。`;
     const range = (value: number) =>
       Number.isFinite(value) && value >= limits.min_control_strength && value <= limits.max_control_strength;
     const message = `${limits.min_control_strength}〜${limits.max_control_strength}の範囲で指定してください。`;
     if (hasFaces && !range(identityStrength)) errors.identity_strength = message;
-    if (poseImage && !range(poseStrength)) errors.pose_strength = message;
+    if (hasPoses && !range(poseStrength)) errors.pose_strength = message;
   }
 
   if (state.loras.length > limits.max_loras) errors.loras = `LoRA は${limits.max_loras}個まで選択できます。`;
@@ -219,6 +229,7 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {
     ok: true,
+    count: numImages ?? 1,
     payload: {
       prompt,
       negative_prompt: negativePrompt,
@@ -230,14 +241,14 @@ export function validateForm(state: FormState, config: AppConfig): ValidationRes
       num_inference_steps: steps ?? 0,
       guidance_scale: guidance,
       seed,
-      num_images: numImages ?? 1,
+      num_images: 1, // one per request; `count` requests are sent
       output_format: values.output_format as OutputFormat,
       quality: quality ?? config.defaults.quality,
       init_image: initImage?.dataUrl ?? null,
       strength: Number.isFinite(strength) ? strength : config.defaults.strength,
       loras: state.loras.map(({ id, scale }) => ({ id, scale })),
       face_images: faceImages.map((img) => img.dataUrl),
-      pose_image: poseImage?.dataUrl ?? null,
+      pose_image: poseImages[0]?.dataUrl ?? null, // one pose per request; see buildSeries
       identity_strength: Number.isFinite(identityStrength) ? identityStrength : config.defaults.identity_strength,
       pose_strength: Number.isFinite(poseStrength) ? poseStrength : config.defaults.pose_strength,
     },

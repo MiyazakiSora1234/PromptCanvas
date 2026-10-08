@@ -102,10 +102,15 @@ def test_unknown_api_route_returns_json_error(make_client: MakeClient) -> None:
 
 def test_frontend_build_is_served(make_client: MakeClient, tmp_path: Path) -> None:
     (tmp_path / "index.html").write_text("<title>PromptCanvas</title>", encoding="utf-8")
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-abc123.js").write_text("console.log(1)", encoding="utf-8")
     client = make_client(serve_frontend=True, frontend_dir=tmp_path)
     res = client.get("/")
     assert res.status_code == 200
     assert "PromptCanvas" in res.text
+    # A rebuilt UI must show up on reload; hashed assets never change.
+    assert res.headers["Cache-Control"] == "no-cache"
+    assert "immutable" in client.get("/assets/index-abc123.js").headers["Cache-Control"]
     # API routes still win over the static mount.
     assert client.get("/api/health").json()["status"] == "ready"
 

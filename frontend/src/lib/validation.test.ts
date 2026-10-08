@@ -7,7 +7,7 @@ const IMAGE: PickedImage = { dataUrl: "data:image/png;base64,AAAA", name: "a.png
 
 function state(
   overrides: Partial<FormValues> = {},
-  extra: Partial<Pick<FormState, "loras" | "initImage" | "faceImages" | "poseImage">> = {},
+  extra: Partial<Pick<FormState, "loras" | "initImage" | "faceImages" | "poseImages">> = {},
 ): FormState {
   const base = initialFormState(CONFIG);
   return {
@@ -15,7 +15,7 @@ function state(
     loras: extra.loras ?? [],
     initImage: extra.initImage ?? null,
     faceImages: extra.faceImages ?? [],
-    poseImage: extra.poseImage ?? null,
+    poseImages: extra.poseImages ?? [],
   };
 }
 
@@ -24,6 +24,7 @@ describe("validateForm", () => {
     const result = validateForm(state({ prompt: "  a cat  ", seed: "42" }), CONFIG);
     expect(result).toEqual({
       ok: true,
+      count: 1,
       payload: {
         prompt: "a cat",
         negative_prompt: "",
@@ -51,7 +52,7 @@ describe("validateForm", () => {
 
   it("includes face/pose references for SDXL models", () => {
     const result = validateForm(
-      state({ model: "sdxl", identity_strength: "1.1" }, { faceImages: [IMAGE, IMAGE], poseImage: IMAGE }),
+      state({ model: "sdxl", identity_strength: "1.1" }, { faceImages: [IMAGE, IMAGE], poseImages: [IMAGE] }),
       CONFIG,
     );
     expect(result.ok && result.payload).toMatchObject({
@@ -65,10 +66,15 @@ describe("validateForm", () => {
   it("rejects references on unsupported models, with img2img, or with bad strengths", () => {
     const sd15 = validateForm(state({}, { faceImages: [IMAGE] }), CONFIG);
     expect(!sd15.ok && sd15.errors.face_images).toContain("SDXL");
-    const withInit = validateForm(state({ model: "sdxl" }, { poseImage: IMAGE, initImage: IMAGE }), CONFIG);
+    const withInit = validateForm(state({ model: "sdxl" }, { poseImages: [IMAGE], initImage: IMAGE }), CONFIG);
     expect(!withInit.ok && withInit.errors.pose_image).toContain("同時に使えません");
-    const strong = validateForm(state({ model: "sdxl", pose_strength: "2" }, { poseImage: IMAGE }), CONFIG);
+    const strong = validateForm(state({ model: "sdxl", pose_strength: "2" }, { poseImages: [IMAGE] }), CONFIG);
     expect(!strong.ok && strong.errors.pose_strength).toBeTruthy();
+    // Several poses multiply the image count, which is capped in total.
+    const many = validateForm(state({ model: "sdxl", num_images: "40" }, { poseImages: [IMAGE, IMAGE, IMAGE] }), CONFIG);
+    expect(!many.ok && many.errors.num_images).toContain("合計100枚");
+    const tooManyPoses = validateForm(state({ model: "sdxl" }, { poseImages: Array(11).fill(IMAGE) }), CONFIG);
+    expect(!tooManyPoses.ok && tooManyPoses.errors.pose_image).toContain("10枚まで");
     const noConfig = validateForm(state({ model: "sdxl" }, { faceImages: [IMAGE] }), { ...CONFIG, identity: null });
     expect(noConfig.ok).toBe(false);
   });
@@ -102,7 +108,9 @@ describe("validateForm", () => {
     [{ guidance_scale: "abc" }, "guidance_scale"],
     [{ seed: "-1" }, "seed"],
     [{ seed: "4294967296" }, "seed"],
-    [{ num_images: "5" }, "num_images"],
+    [{ num_images: "0" }, "num_images"],
+    [{ num_images: "101" }, "num_images"],
+    [{ num_images: "2.5" }, "num_images"],
     [{ output_format: "gif" }, "output_format"],
     [{ output_format: "jpeg", quality: "0" }, "quality"],
   ])("rejects %o", (overrides, field) => {

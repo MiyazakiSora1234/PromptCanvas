@@ -3,7 +3,8 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
 // jsdom has no object URLs.
-URL.createObjectURL = vi.fn(() => "blob:mock-image");
+let objectUrls = 0;
+URL.createObjectURL = vi.fn(() => `blob:mock-image-${++objectUrls}`);
 URL.revokeObjectURL = vi.fn();
 
 afterEach(() => {

@@ -1,9 +1,8 @@
 import type { AppConfig, ModelOption } from "../../api/types";
-import type { FieldErrors, FormValues } from "../../lib/validation";
+import { MAX_IMAGES, type FieldErrors, type FormValues } from "../../lib/validation";
 import type { makeControlProps } from "../formControl";
 import { HELP } from "../../lib/help";
 import { StrengthSlider } from "../StrengthSlider";
-import { buttonClass } from "../styles";
 import { Field } from "../ui";
 
 interface BasicSettingsProps {
@@ -33,7 +32,6 @@ export function BasicSettings({
   const { limits } = config;
   const format = config.output_formats.find((f) => f.id === values.output_format);
   const selectedStyle = config.styles.find((s) => s.id === values.style);
-  const batchSizes = Array.from({ length: limits.max_batch_size }, (_, i) => i + 1);
 
   return (
     <>
@@ -81,30 +79,9 @@ export function BasicSettings({
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
-        <fieldset className="flex min-w-0 flex-col gap-1">
-          <legend className="mb-1 text-sm font-semibold">枚数</legend>
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="枚数">
-            {batchSizes.map((n) => (
-              <label key={n} className="cursor-pointer">
-                <input
-                  type="radio"
-                  name="num_images"
-                  value={n}
-                  checked={values.num_images === String(n)}
-                  onChange={() => onValueChange("num_images", String(n))}
-                  className="peer sr-only"
-                />
-                <span
-                  className={`${buttonClass} px-3 py-1 text-sm peer-checked:border-indigo-600 peer-checked:bg-indigo-50 peer-checked:text-indigo-700 peer-focus-visible:outline-2 peer-focus-visible:outline-indigo-600 dark:peer-checked:bg-indigo-950 dark:peer-checked:text-indigo-300`}
-                >
-                  {n}
-                </span>
-              </label>
-            ))}
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{HELP.numImages}</p>
-          {fieldErrors.num_images && <p className="text-xs text-red-700 dark:text-red-300">{fieldErrors.num_images}</p>}
-        </fieldset>
+        <Field id="num_images" label="枚数" error={fieldErrors.num_images} hint={HELP.numImages}>
+          <input {...control("num_images")} type="number" inputMode="numeric" min={1} max={MAX_IMAGES} step={1} />
+        </Field>
         <Field id="output_format" label="画像形式" error={fieldErrors.output_format} hint={HELP.outputFormat}>
           <select {...control("output_format")}>
             {config.output_formats.map((f) => (

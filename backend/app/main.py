@@ -7,10 +7,12 @@ import threading
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import PurePath
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from . import api
 from .api.error_handlers import register_error_handlers
@@ -29,6 +31,17 @@ def _configure_logging(level: str) -> None:
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # huggingface_hub logs every HTTP request at INFO via httpx; too noisy during model download.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+class _FrontendFiles(StaticFiles):
+    """The built UI. Vite's assets have content hashes in their names, so they can be cached for
+    good; everything else (index.html) is revalidated so a rebuilt UI shows up on reload."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        immutable = PurePath(path).parts[:1] == ("assets",)  # path uses the OS separator
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable" if immutable else "no-cache"
+        return response
 
 
 async def _add_request_id(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
@@ -83,7 +96,7 @@ def create_app(
     # Mounted last so it never shadows /api routes.
     if settings.serve_frontend:
         if settings.frontend_dir.is_dir():
-            app.mount("/", StaticFiles(directory=settings.frontend_dir, html=True), name="frontend")
+            app.mount("/", _FrontendFiles(directory=settings.frontend_dir, html=True), name="frontend")
         else:
             logger.warning(
                 "Frontend build not found at %s; serving the API only. Run `npm run build` in frontend/ "

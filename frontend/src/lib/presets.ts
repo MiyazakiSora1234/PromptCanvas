@@ -88,7 +88,7 @@ export function applyPreset(state: FormState, settings: PresetSettings, config: 
 
   // Face/pose references only work with some model families.
   const keepRefs = supportsReference(config, model);
-  if (!keepRefs && (state.faceImages.length > 0 || state.poseImage)) {
+  if (!keepRefs && (state.faceImages.length > 0 || state.poseImages.length > 0)) {
     warnings.push("このモデルでは顔・ポーズの参照が使えないため、参照画像を外しました。");
   }
 
@@ -100,7 +100,7 @@ export function applyPreset(state: FormState, settings: PresetSettings, config: 
       loras,
       initImage: state.initImage,
       faceImages: keepRefs ? state.faceImages : [],
-      poseImage: keepRefs ? state.poseImage : null,
+      poseImages: keepRefs ? state.poseImages : [],
     },
   };
 }

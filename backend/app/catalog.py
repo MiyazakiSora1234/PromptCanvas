@@ -173,7 +173,8 @@ class PresetSettings(BaseModel):
     num_inference_steps: int | None = None
     guidance_scale: float | None = None
     negative_prompt: str | None = None
-    num_images: int | None = None
+    # The UI's image count (generated one by one), not the per-request batch size.
+    num_images: int | None = Field(default=None, ge=1, le=100)
     output_format: Literal["png", "jpeg", "webp"] | None = None
     quality: int | None = Field(default=None, ge=1, le=100)
     loras: tuple[PresetLora, ...] = ()
@@ -250,9 +251,7 @@ class Catalog(BaseModel):
             )
         for p in self.presets:
             s = p.settings
-            _check_values(
-                f"preset '{p.id}':", settings, s.width, s.height, s.num_inference_steps, s.guidance_scale, s.num_images
-            )
+            _check_values(f"preset '{p.id}':", settings, s.width, s.height, s.num_inference_steps, s.guidance_scale)
 
 
 def _check_values(
@@ -262,7 +261,6 @@ def _check_values(
     height: int | None,
     steps: int | None,
     guidance: float | None,
-    num_images: int | None = None,
 ) -> None:
     """Raise ValueError if a value (None = not set) is outside what requests may use."""
     for name, size in (("width", width), ("height", height)):
@@ -274,8 +272,6 @@ def _check_values(
         raise ValueError(f"{where} steps exceed PROMPTCANVAS_MAX_STEPS")
     if guidance is not None and not 0 <= guidance <= settings.max_guidance_scale:
         raise ValueError(f"{where} guidance_scale exceeds the configured maximum")
-    if num_images is not None and not 1 <= num_images <= settings.max_batch_size:
-        raise ValueError(f"{where} num_images exceeds PROMPTCANVAS_MAX_BATCH_SIZE")
 
 
 def load_catalog(settings: Settings) -> Catalog:
